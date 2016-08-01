@@ -1,0 +1,40 @@
+world：
+
+信息共享：
+D3DXVECTOR3 viewpos;
+D3DXMATRIX ViewTranslation;	//视角矩阵（全局平移矩阵）
+bool viewchanged;		//视角是否改变，条件更新view
+bool moved;			//人物（视角）是否移动，条件更新阴影矩阵，是viewchanged的子集
+D3DXMATRIX matSun;
+D3DXMATRIX sunTranslation;	//太阳平移矩阵
+D3DXMATRIX sunRotate;		//太阳旋转矩阵
+bool shadowchanged;		//太阳位置是否改变，条件更新阴影矩阵
+D3DXVECTOR4 sunLight;		//太阳位置
+D3DXMATRIX matShadow;		//阴影矩阵
+D3DMATERIAL9 shadowmtrl;
+
+viewpos:
+	在子线程中根据moved条件更新ViewTranslation
+	在viewer的SetView()中用来更新matView并设置SetTransform(D3DTS_VIEW, &matView);
+	*在viewer的Walk（）和Rotate（）中实时更新（在SetViewVector（）内更新）
+ViewTranslation:
+	environment中天空使用的水平平移矩阵
+	environment中太阳使用的水平平移矩阵，和sunTranslation相乘得到matSun（最终太阳矩阵）;
+	在environment初始化函数InitMaterialLight（）中初始化matSun
+	在viewer构造函数中初始化
+	* 在viewer的Walk（）中实时更新
+matSun:
+	在environment初始化函数InitMaterialLight（）中初始化matSun= ViewTranslation * sunTranslation
+	* 在environment的Draw（）中根据moved条件更新
+sunTranslation:
+	在environment初始化函数InitMaterialLight（）中初始化（与light0位置同步）
+	* 在子线程中根据moved条件更新matSun
+sunRotate:
+	未使用，用作平面太阳模型旋转
+sunLight:
+	太阳位置和光源类型信息
+matShadow:
+	在environment初始化函数InitMaterialLight（）中根据sunLight和groundPlane初始化，并用groundPlane.d平移抬升至设定距离地面的高度
+	在viewer的Draw（）中根据shadowchanged和moved条件更新matShadowWorld
+	
+TODO：定时更新太阳位置（sunLight，matSun，sunTranslation，sunRotate，matShadow，shadowchanged）
