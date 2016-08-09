@@ -5,7 +5,6 @@
 #include "worldviewer.h"
 #include "worldblock.h"
 #include "environment.h"
-//#include "d3dfont.h"
 
 #include <d3d9.h>
 #include <d3dx9tex.h>
@@ -28,8 +27,8 @@ using std::wstring;
 	
 
 //鼠标模式
-#define CURSORMODE_NORMAL		1
-#define CURSORMODE_CAPTURE		2
+#define CONTROLMODE_NORMAL		1
+#define CONTROLMODE_CAPTURE		2
 
 //运行模式
 #define MODE_STOP				0
@@ -37,37 +36,26 @@ using std::wstring;
 #define MODE_MENU				2
 #define MODE_PAUSE				3
 
-#define STOPCAPTUREFREQ			20		// STOP模式下主循环频率(降低频率)
+#define STOPCAPTUREFREQ			40		// STOP模式下主循环频率(降低频率)
 
 #define INVALIDKEY_DELAY		0.4f	//非法字符显示持续时间（秒）
 
 struct threadparam {
-	/*LPD3DXFONT *font;
-	float *fps;
-	float *avgfps;
-	float *frametime;
-	time_t *loopcount;
-	RECT *text;*/
 	bool *start;
 	POINT *pclientcenter;
 	WViewer *pviewer;
-	int *pcursormode; 
+	int *pcontrolmode; 
 };
 
 DWORD WINAPI ThreadProc(LPVOID lpParam)//子线程，处理运动，视角移动
 {
-	threadparam* tpp = (threadparam*)lpParam;
 	POINT cursorpos, bias;
-	/*LPD3DXFONT *font = tpp->font;
-	float *fps = tpp->fps;
-	float *avgfps = tpp->avgfps;
-	float *frametime = tpp->frametime;
-	time_t *loopcount = tpp->loopcount;
-	RECT *text = tpp->text;*/
+
+	threadparam* tpp = (threadparam*)lpParam;
 	bool *start = tpp->start;
 	POINT *pclientcenter = tpp->pclientcenter;
 	WViewer *pviewer = tpp->pviewer;
-	int *pcursormode = tpp->pcursormode;
+	int *pcontrolmode = tpp->pcontrolmode;
 
 	WCHAR show[40];
 	while (true)
@@ -75,7 +63,7 @@ DWORD WINAPI ThreadProc(LPVOID lpParam)//子线程，处理运动，视角移动
 		if (*start)
 		{
 			pviewer->HandleMove();//处理视角移动
-			if (*pcursormode == CURSORMODE_CAPTURE)//处理视角旋转
+			if (*pcontrolmode == CONTROLMODE_CAPTURE)//处理视角旋转
 			{
 				GetCursorPos(&cursorpos);
 				SetCursorPos(pclientcenter->x, pclientcenter->y);//将指针重置到窗口中点
@@ -87,16 +75,15 @@ DWORD WINAPI ThreadProc(LPVOID lpParam)//子线程，处理运动，视角移动
 			}
 			//处理太阳（月亮、星星、云等环境）移动
 			
-			/*if ((loopcount & 0x2) == 0)
-			{*/
-				if (moved)//更新全局平移矩阵，调整environment位置，保持与眼镜相对位置不变
-				{
-					D3DXMatrixIdentity(&ViewTranslation);
-					D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, 0.0f);//z方向不平移
-				}
-				if (shadowchanged || moved)
-					matSun = ViewTranslation * sunTranslation;//更新太阳矩阵
-			//}
+			
+			if (moved)//更新全局平移矩阵，调整environment位置，保持与眼镜相对位置不变
+			{
+				D3DXMatrixIdentity(&ViewTranslation);
+				D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, 0.0f);//z方向不平移
+			}
+			if (shadowchanged || moved)
+				matSun = ViewTranslation * sunTranslation;//更新太阳矩阵
+
 			*start = false;
 		}
 		else
@@ -108,7 +95,7 @@ DWORD WINAPI ThreadProc(LPVOID lpParam)//子线程，处理运动，视角移动
 
 
 //子线程
-threadparam tp;//传递给子线程的参数
+threadparam tp;							//传递给子线程的参数
 DWORD threadID;
 HANDLE hThread;
 bool startthread;						//是否允许子线程运行的标志
@@ -137,8 +124,8 @@ LARGE_INTEGER frequency;				//计数器频率
 LARGE_INTEGER stime, etime, stime2, etime2;
 
 //模式
-int mode, lastmode;						//运行模式, 存储先前模式（用于恢复）
-int cursormode;							//鼠标捕捉模式（是否捕捉）
+int mode, lastmode;						//运行模式; 存储先前模式（用于恢复）
+int controlmode;						//鼠标捕捉模式
 bool infoshow;							//是否显示信息
 bool otherinfoshow;						//是否显示其他信息
 bool fpsshow;							//是否显示fps
@@ -151,13 +138,16 @@ D3DDISPLAYMODE displaymode;				//显示模式
 LPDIRECT3DSURFACE9 surf;				//暂未使用
 byte multisample, maxmmultisample;		//多重采样模式
 bool mslist[17];						//多重采样模式适用列表
+D3DCAPS9 caps;							//设备能力
+float depthbias;						//阴影zdepth抬离地面，防止zfighting
+float sdepthbias;						//防止静距离阴影不可见
+bool depthbiasable;						//depthbias是否可用
 
 //信息显示
 LPD3DXFONT font, font2, font3;			//字体
-//CD3DFont d3dfont;
 RECT text, text2, text3, text4, text5, text6, text7;//文字信息显示区域
 RECT text8, text9, text10, text11, text12;
-WCHAR show[100], showms[100], status1[100], status2[100];//文字信息缓存
+WCHAR show[256], showms[100], status1[100], status2[100];//文字信息缓存
 
 
 //观察者
@@ -170,27 +160,29 @@ Environment environment;
 //
 //信息共享
 //
+//眼睛位于哪个区块
+INDEX2D blockindex;
 //眼睛位置
-	//[WViewer构造函数中初始化，Walk()、SetViewmode()、KeyControlDown()和SetViewVector()中实时更新
+	//[在WViewer构造函数中初始化，Walk()、SetViewmode()、KeyControlDown()和SetViewVector()中实时更新
 	//	，子线程和SetViewmode()中更新ViewTranslation, SetView()中用来SetTransform(D3DTS_VIEW,)]
 D3DXVECTOR3 viewpos;
 //视角矩阵（全局平移矩阵），environment绘制所使用的水平平移矩阵
-	//[子线程中根据moved用viewpos实时条件更新，子线程中根据moved和shadowchanged实时更新matSun
+	//[在子线程中根据moved用viewpos实时条件更新，子线程中根据moved和shadowchanged实时更新matSun
 	//	，在WViewer构造函数中用viewpos初始化，在environment的InitMaterialLight()中初始化matSun]
 D3DXMATRIX ViewTranslation;	
-//视角是否改变，条件更新view
-	//[SetViewmode()、Walk()、Rotate()中设置为true，MainLoop()中用于条件SetView()的依据
+//视角是否改变，条件更新view，不等于viewer的matTranslation。【不实时更新，渲染帧时更新】
+	//[在SetViewmode()、Walk()、Rotate()中设置为true，MainLoop()中用于条件SetView()的依据
 	//	并在所有元素绘制结束后设置为false，在InitInstance()中初始化]
 bool viewchanged;
 //视角是否移动，条件更新阴影矩阵，是viewchanged的子集
-	//[子线程中用来条件更新ViewTranslation和matSun的依据，在WViewer的Draw()中用于条件更新matShadowWorld的依据
+	//[在子线程中用来条件更新ViewTranslation和matSun的依据，在WViewer的Draw()中用于条件更新matShadowWorld的依据
 	//	，在Walk()中设置为true，在MainLoop()中所有元素绘制结束后设置为false，在InitInstance()中初始化为true]
 bool moved;
 //太阳世界矩阵（= ViewTranslation * sunTranslation）
 	//[在子线程中根据shadowchanged || moved条件更新，在InitMaterialLight()中初始化为true
 	//	在InitInstance()中初始化为true]
-D3DXMATRIX matSun;
-//太阳平移矩阵
+D3DXMATRIX matSun; 
+//太阳平移矩阵【不实时更新，渲染帧时更新】
 	//[在子线程中用于条件更新matSun，在InitMaterialLight()中用sunLight初始化并更新matSun]
 D3DXMATRIX sunTranslation;
 D3DXMATRIX sunRotate;			//太阳旋转矩阵，unused
@@ -210,20 +202,23 @@ D3DXMATRIX matShadow;
 //阴影材质
 D3DMATERIAL9 shadowmtrl;
 
-inline void MainLoop();			//主循环
+//主循环
+inline void MainLoop();			
 
+//初始化
 void Init();					//参数、状态初始化
-
 void D3DInit(HWND wnd, D3DMULTISAMPLE_TYPE ms);	//D3D初始化
 void CreateDevice();			//创建设备
 void DeviceInit();				//设备参数设置
 void SetTextRect();				//设置显示文字信息的区域（根据窗口尺寸）
-_D3DMULTISAMPLE_TYPE GetMultisampleType(LPDIRECT3D9 lp, D3DDISPLAYMODE dm);	//获得多重采样适用范围
+_D3DMULTISAMPLE_TYPE GetMultisampleType(LPDIRECT3D9 lp, D3DDISPLAYMODE dm);	//获得多重采样适用范围，并设置最大多重采样
 void ChangeMultiSample();		//更改多重采样模式
 
-void OnLostDevice(void);		//设备丢失处理
-void OnResetDevice(void);		//设备重置处理
+//设备处理
+void OnLostDevice();			//设备丢失处理
+void OnResetDevice();			//设备重置处理
 
+//显示
 inline void FpsShow();			//显示fps
 inline void InfoShow();			//显示信息
 inline void OtherInfoShow();	//显示其他信息
@@ -232,7 +227,8 @@ inline void UpdateStatusStr();	//更新状态字符串
 //时间
 inline string GetWDayStr(int wday);	//得到星期几字符串
 inline void Get2WndRect();			//获取实时窗口和客户区区域
+
 //控制
 bool FullScreen(bool tofull);	//设置全屏模式
-void CaptureCursor();
-void ReleaseCursor();
+void CaptureControl();
+void ReleaseControl();

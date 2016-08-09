@@ -35,33 +35,30 @@ public:
 	void InitMaterialLight();
 	inline bool Draw()
 	{
-
 		if (!device)
 			return false;
 
 		if (!skyback)
 			return false;
+
 		//画天空
-		//if (moved)//，转到子线程
-		//{
-		//	D3DXMatrixIdentity(&ViewTranslation);
-		//	D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, 0.0f);//z方向不平移
-		//}
 		device->SetTransform(D3DTS_WORLD, &ViewTranslation);
 		device->SetRenderState(D3DRS_LIGHTING, FALSE);//临时关闭光照
 		device->SetRenderState(D3DRS_FOGENABLE, FALSE);//临时关闭雾
 
-		//device->SetMaterial(&material0);
+		device->SetMaterial(&material0);
 		skyback->DrawSubset(0);
 
+		if (!sun)
+			return false;
+
 		//画太阳
-		//if(moved)
-		//	matSun = ViewTranslation * sunTranslation;//更新太阳矩阵，转到子线程
 		device->SetTransform(D3DTS_WORLD, &matSun);
 		sun->DrawSubset(0);
 
 		device->SetRenderState(D3DRS_LIGHTING, TRUE);
 		device->SetRenderState(D3DRS_FOGENABLE, TRUE);
+
 		return true;
 	}
 };

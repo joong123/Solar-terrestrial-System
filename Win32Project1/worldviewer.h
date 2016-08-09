@@ -34,13 +34,14 @@ using std::string;
 
 //运动
 const WCHAR walkdirection[10] = { L'○', L'↑', L'←', L'→', L'↓', L'↖', L'↗', L'↙', L'↘', L'﹡' };
-const float division = 0.04f;		//最小位移分度值
+const char viewdirection[][3] = { "E", "NE", "N", "NW", "W", "SW", "S", "SE", "E"};//视角方向
+const float division = 0.04f;				//最小位移分度值
 const float speednormal = WALKSPEED;		//正常速度
-const float speeddelaytime = 0.04f;	//速度维持不变的时间。残余速度时间1
-const float speedsmoothtime = 0.1f;	//速度降为0需要的时间。残余速度时间2
-const float chasedist = 1.2f;		//追捕视角水平距离
-const float chasescreenheight = 0.5f;		//追捕视角高度
-const float overlookscreenheight = 400.0f;//俯视高度
+const float speeddelaytime = 0.04f;			//速度维持不变的时间。残余速度时间1
+const float speedsmoothtime = 0.1f;			//速度降为0需要的时间。残余速度时间2
+const float chasedist = 1.2f;				//追捕视角水平距离
+const float chasescreenheight = 0.4f;		//追捕视角高度
+const float overlookscreenheight = 300.0f;	//俯视高度
 
 //共享变量
 //extern D3DXVECTOR4 sunPos;
@@ -51,45 +52,53 @@ class WViewer {
 public:
 	LPDIRECT3DDEVICE9 device;
 
+	//绘图
 	ID3DXMesh* figure;
 	ID3DXMesh* figurelight;
 
+	//矩阵
 	D3DXMATRIXA16 matView;				//view矩阵
-	D3DXMATRIXA16 matWorld;				//时间矩阵
+	D3DXMATRIXA16 matWorld;				//人物的世界矩阵（包括平移和水平旋转）
 	D3DXMATRIXA16 matTranslation;		//人物平移矩阵
+	D3DXMATRIXA16 matTranslation2;		//人物平移微小偏移，用于figurelight，防止两次渲染后重叠产生干扰线
 	D3DXMATRIXA16 matHRotate;			//人物水平旋转矩阵
 	D3DXMATRIXA16 matShadowWorld;		//影子矩阵
 
+	//材质 & 纹理
 	D3DMATERIAL9 figuremtrl;
 	LPDIRECT3DTEXTURE9 g_Texture;
 
-	D3DXVECTOR3 pos;				//人物位置
-	float figurehangle, figurevangle;//人物朝向
-	//D3DXVECTOR3 viewpos;			//眼睛真实位置，转为全局变量
-	float hAngle;					//视角水平面角度	(0~360) x正向=0
-	float vAngle;					//视角纵向角度	(-90~90)
-	D3DXVECTOR3 viewdirection;		//眼睛方向, added
-	D3DXVECTOR3 at;					//视线目标
+	//实时信息
+	D3DXVECTOR3 pos;					//人物位置
+	float figurehangle, figurevangle;	//人物朝向
+	//D3DXVECTOR3 viewpos;				//眼睛真实位置，转为全局变量
+	float hAngle;						//视角水平面角度	(0~360) x正向=0
+	float vAngle;						//视角纵向角度	(-90~90)
+	D3DXVECTOR3 displacement;			//位移
+	D3DXVECTOR3 viewdirection;			//眼睛方向, added
+	D3DXVECTOR3 at;						//视线目标
 	D3DXVECTOR3 up;
-	float viewangle;				//视野角度
-	float viewaspect;				//视野长宽比
+	float viewangle;					//视野角度
+	float viewaspect;					//视野长宽比
 
-	LARGE_INTEGER frequency;		//计时器频率
-	LARGE_INTEGER endtick;			//结束方向键时的ticks，用于残余速度计算
-	LARGE_INTEGER lasttick;			//上一个tick，用于当前行走距离计算
-	float speed;					//当前速度
-	int remnantspeedmode;			//残余速度模式
-	int curdirection;				//当前运动方向
-	int lastdirection;				//当前方向为0时存储上一个方向，处理残余速度的运动
-	bool wdown, sdown, adown, ddown;//按键状态
-	bool shiftdown;					//按键状态
+	//物理运动
+	LARGE_INTEGER frequency;			//计时器频率
+	LARGE_INTEGER endtick;				//结束方向键时的ticks，用于残余速度计算
+	LARGE_INTEGER lasttick;				//上一个tick，用于当前行走距离计算
+	float speed;						//当前速度
+	int remnantspeedmode;				//残余速度模式
+	int curdirection;					//当前运动方向
+	int lastdirection;					//当前方向为0时存储上一个方向，处理残余速度的运动
+	bool wdown, sdown, adown, ddown;	//按键状态
+	bool shiftdown;						//按键状态
 
-	D3DXVECTOR3 figureeye;			//视角位置(人物眼睛相对人物模型位置)
-	float viewradius;				//视野距离
-	float sensitivity;				//旋转灵敏度
-	float hcos, hsin, vsin, vcos;	//加速运算
+	D3DXVECTOR3 figureeye;				//视角位置(人物眼睛相对人物模型位置)
+	float viewradius;					//视野距离
+	float sensitivity;					//旋转灵敏度
+	float hcos, hsin, vsin, vcos;		//加速运算
+	bool flashlight;
 
-	int viewmode;					//view模式
+	int viewmode;						//view模式
 
 public:
 	WViewer();
@@ -214,38 +223,49 @@ public:
 			if (direction == DIRECTION_TOP)//前进
 			{
 				pos += D3DXVECTOR3(dist*hcos, dist*hsin, 0.0f);
+				displacement = D3DXVECTOR3(dist*hcos, dist*hsin, 0.0f);
 			}
 			else if (direction == DIRECTION_DOWN)
 			{
 				pos += D3DXVECTOR3(-dist*hcos, -dist*hsin, 0.0f);
+				displacement = D3DXVECTOR3(-dist*hcos, -dist*hsin, 0.0f);
 			}
 			else if (direction == DIRECTION_LEFT)
 			{
 				pos += D3DXVECTOR3(-dist*hsin, dist*hcos, 0.0f);
+				displacement = D3DXVECTOR3(-dist*hsin, dist*hcos, 0.0f);
 			}
 			else if (direction == DIRECTION_RIGHT)
 			{
 				pos += D3DXVECTOR3(dist*hsin, -dist*hcos, 0.0f);
+				displacement = D3DXVECTOR3(dist*hsin, -dist*hcos, 0.0f);
 			}
 			else if (direction == DIRECTION_TOPLEFT)
 			{
 				pos += D3DXVECTOR3(dist*cos(hAngle + D3DX_PI / 8), dist*sin(hAngle + D3DX_PI / 8), 0.0f);
+				displacement = D3DXVECTOR3(dist*cos(hAngle + D3DX_PI / 8), dist*sin(hAngle + D3DX_PI / 8), 0.0f);
 			}
 			else if (direction == DIRECTION_TOPRIGHT)
 			{
-				pos += D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8), dist*sin(hAngle - D3DX_PI / 8), 0.0f);
+				pos += D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8), dist*sin(hAngle - D3DX_PI / 8), 0.0f); 
+				displacement = D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8), dist*sin(hAngle - D3DX_PI / 8), 0.0f);
 			}
 			else if (direction == DIRECTION_BOTTOMLEFT)
 			{
 				pos += D3DXVECTOR3(-dist*cos(hAngle - D3DX_PI / 8), -dist*sin(hAngle - D3DX_PI / 8), 0.0f);
+				displacement = D3DXVECTOR3(-dist*cos(hAngle - D3DX_PI / 8), -dist*sin(hAngle - D3DX_PI / 8), 0.0f);
 			}
 			else if (direction == DIRECTION_BOTTOMRIGHT)
 			{
 				pos += D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8), -dist*sin(hAngle + D3DX_PI / 8), 0.0f);
+				displacement = D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8), -dist*sin(hAngle + D3DX_PI / 8), 0.0f);
 			}
 			//更新平移矩阵
 			D3DXMatrixIdentity(&matTranslation);
 			D3DXMatrixTranslation(&matTranslation, pos.x, pos.y, pos.z);
+			//更新平移偏转矩阵
+			D3DXMatrixIdentity(&matTranslation2);
+			D3DXMatrixTranslation(&matTranslation2, pos.x + TINYBIAS, pos.y, 0);
 			//更新世界矩阵
 			D3DXMatrixIdentity(&matWorld);
 			D3DXMatrixMultiply(&matWorld, &matTranslation, &matWorld);
@@ -286,6 +306,7 @@ public:
 			{
 				viewpos += accerate*D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8), -dist*sin(hAngle + D3DX_PI / 8), 0.0f);
 			}
+			displacement = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
 		}
 		else if (viewmode == VIEWMODE_FREE)
 		{
@@ -321,7 +342,11 @@ public:
 			{
 				viewpos += D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8)*vcos, -dist*sin(hAngle + D3DX_PI / 8)*vcos, -dist*vsin / 2);
 			}
+			displacement = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
 		}
+		//更新区块位置
+		blockindex.x = floor((viewpos.x + 200) / 400);
+		blockindex.y = floor((viewpos.y + 200) / 400);
 
 		SetViewVector();
 
@@ -350,6 +375,7 @@ public:
 
 		if (viewmode == VIEWMODE_CHASE || viewmode == VIEWMODE_FIRSTPERSON)
 		{
+			//同步人物角度
 			figurehangle = hAngle;
 			figurevangle = vAngle;
 
@@ -360,6 +386,10 @@ public:
 			D3DXMatrixIdentity(&matWorld);
 			D3DXMatrixMultiply(&matWorld, &matTranslation, &matWorld);
 			D3DXMatrixMultiply(&matWorld, &matHRotate, &matWorld);
+
+			//更新区块位置
+			blockindex.x = floor((viewpos.x + 200) / 400);
+			blockindex.y = floor((viewpos.y + 200) / 400);
 		}
 		hcos = cos(hAngle);
 		hsin = sin(hAngle);
@@ -392,41 +422,64 @@ public:
 		device->SetMaterial(&figuremtrl);
 		figure->DrawSubset(0);
 
-		//物体光源贴图
-		//device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
-		//device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		//device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_ONE);
-		//device->SetRenderState(D3DRS_LIGHTING, FALSE);//光照
-		//device->SetTexture(0, g_Texture);
-		//figurelight->DrawSubset(0);
-		//device->SetTexture(0, 0);
-		//device->SetRenderState(D3DRS_LIGHTING, TRUE);//光照
-		//device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		//device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 		//
 		//shadow 绘制
 		//
-		//DrawShadow(figure, matWorld);
-
 		if (shadowchanged || moved)
-			matShadowWorld = matWorld * matShadow;
+			matShadowWorld = matTranslation * matShadow;
 		device->SetTransform(D3DTS_WORLD, &matShadowWorld);
 
-		device->SetRenderState(D3DRS_STENCILENABLE, TRUE);//开启Stencil buffer
-		//device->Clear(0, NULL, D3DCLEAR_STENCIL, 0, 0, 0);//清除stencil??是否需要
-		device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);//alpha blend the shadow
+		ShadowBegin();
+		figure->DrawSubset(0);
+		ShadowEnd();
+
+
+		if (flashlight)
+		{
+			DrawLight();
+		}
+
+	}
+	inline void DrawLight()
+	{
+		if (!figurelight)
+			return;
+
+		device->SetTransform(D3DTS_WORLD, &matTranslation);
+
+		//物体光源贴图
+		device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
+		//device->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, TRUE);
+		//搭配1：D3DBLEND_DESTCOLOR & D3DBLEND_SRCALPHA
+		//搭配2：D3DBLEND_SRCALPHA & D3DBLEND_INVSRCALPHA || D3DBLEND_INVDESTCOLOR & D3DBLEND_SRCALPHA
+		//搭配3：D3DBLEND_SRCALPHA & D3DBLEND_SRCALPHA
+		device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_DESTCOLOR);
+		device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_SRCALPHA);
 		device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);//关闭ZBUFFER的写入，防重影闪烁
 		device->SetRenderState(D3DRS_FOGENABLE, FALSE);//关闭雾，防阴影全雾色
-		device->SetRenderState(D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_MATERIAL);//设置材质为颜色来源，防阴影颜色不对
+		device->SetRenderState(D3DRS_LIGHTING, FALSE);//关闭光照
 
-		device->SetMaterial(&shadowmtrl);
-		//device->SetTexture(0, 0);//??
-		figure->DrawSubset(0);
+		device->SetTexture(0, g_Texture); 
+		float db2 = DEPTHBIAS;
+		float sdb2 = SLOPESCALEDEPTHBIAS;
+		if (depthbiasable)
+		{
+			device->SetRenderState(D3DRS_DEPTHBIAS, *((DWORD*)&db2));
+			device->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, *((DWORD*)&sdb2));
+		}
+		figurelight->DrawSubset(0); 
+		device->SetTransform(D3DTS_WORLD, &matTranslation2);
+		//figurelight->DrawSubset(0);
+		device->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, 0);
+		device->SetRenderState(D3DRS_DEPTHBIAS, 0);
+		device->SetTexture(0, 0);
 
-		device->SetRenderState(D3DRS_DIFFUSEMATERIALSOURCE, D3DMCS_COLOR1);
-		device->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+		device->SetRenderState(D3DRS_LIGHTING, TRUE);
 		device->SetRenderState(D3DRS_FOGENABLE, TRUE);
+		device->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);//关闭ZBUFFER的写入，防重影闪烁
+		device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+		device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 		device->SetRenderState(D3DRS_ALPHABLENDENABLE, FALSE);
-		device->SetRenderState(D3DRS_STENCILENABLE, FALSE);
+
 	}
 };

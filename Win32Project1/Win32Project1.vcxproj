@@ -175,7 +175,6 @@
     <ResourceCompile Include="Win32Project1.rc" />
   </ItemGroup>
   <ItemGroup>
-    <Image Include="..\light.jpg" />
     <Image Include="small.ico" />
     <Image Include="Win32Project1.ico" />
   </ItemGroup>

@@ -11,6 +11,7 @@ WViewer::WViewer():	device(NULL),
 					//viewpos(D3DXVECTOR3(0.0f, 0.0f, 0.0f)),
 					hAngle(0.0f),
 					vAngle(0.0f),
+					displacement(D3DXVECTOR3(0.0f, 0.0f, 0.0f)),
 					viewdirection(D3DXVECTOR3(1.0f, 0.0f, 0.0f)),
 					at(D3DXVECTOR3(1.0f, 0.0f, 0.0f)),
 					up(D3DXVECTOR3(0.0f, 1.0f, 0.0f)),
@@ -30,11 +31,14 @@ WViewer::WViewer():	device(NULL),
 					hcos(1.0f),
 					hsin(0.0f),
 					vcos(1.0f),
-					vsin(0.0f)
+					vsin(0.0f),
+					flashlight(true)
 {
 	//初始化位置，矩阵
 	D3DXMatrixIdentity(&matTranslation);
 	D3DXMatrixTranslation(&matTranslation, pos.x, pos.y, pos.z);
+	D3DXMatrixIdentity(&matTranslation2);
+	D3DXMatrixTranslation(&matTranslation2, pos.x + TINYBIAS, pos.y, 0);
 	D3DXMatrixIdentity(&matHRotate);
 	D3DXMatrixRotationZ(&matHRotate, figurehangle);
 	D3DXMatrixIdentity(&matWorld);
@@ -44,7 +48,9 @@ WViewer::WViewer():	device(NULL),
 	lasttick.QuadPart = 0;
 
 	SetViewmode(VIEWMODE_CHASE);
+
 	//初始化全局眼睛位置矩阵，平移矩阵
+	blockindex = { 0, 0 };
 	viewpos = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
 	D3DXMatrixIdentity(&ViewTranslation);
 	D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, viewpos.z);
@@ -79,18 +85,23 @@ void WViewer::SetFigure()
 	ZeroMemory(&figuremtrl, sizeof(D3DMATERIAL9));
 	figuremtrl.Ambient = { 1.0f,0.5f,0.5f,1.0f };
 	figuremtrl.Diffuse = { 1.0f,0.5f,0.5f,0.8f };
-	figuremtrl.Specular = { 0.0f,0.0f,0.0f,1.0f };
+	figuremtrl.Specular = { 0.6f,0.6f,0.6f,1.0f };
 	figuremtrl.Emissive = { 0.0f,0.0f,0.0f,0.0f };
 	figuremtrl.Power = 400.0f;
 
 	//figurelight
 
+	float figurelightradius = 0.8f;
 	CUSTOMVERTEX3 g_vertices[4] =
 	{
-		{ D3DXVECTOR3(-1.0, -1.0, -SHADOWHEIGHT_MIN), D3DCOLOR_ARGB(0,255,255,255) , 0.0f, 1.0f}
-		,{ D3DXVECTOR3(-1.0, 1.0, -SHADOWHEIGHT_MIN),  D3DCOLOR_ARGB(0,255,255,255) , 0.0f, 0.0f}
-		,{ D3DXVECTOR3(1.0, 1.0, -SHADOWHEIGHT_MIN),  D3DCOLOR_ARGB(0,255,255,255) , 1.0f, 0.0f }
-		,{ D3DXVECTOR3(1.0, -1.0, -SHADOWHEIGHT_MIN),  D3DCOLOR_ARGB(0,255,255,255) , 1.0f, 1.0f }
+		{ D3DXVECTOR3(-figurelightradius, -figurelightradius, -SHADOWHEIGHT_MIN)
+		,D3DXVECTOR3(0, 0, -1), D3DCOLOR_ARGB(0,255,255,255) , 0.0f, 1.0f}
+		,{ D3DXVECTOR3(-figurelightradius, figurelightradius, -SHADOWHEIGHT_MIN)
+		,D3DXVECTOR3(0, 0, -1), D3DCOLOR_ARGB(0,255,255,255) , 0.0f, 0.0f}
+		,{ D3DXVECTOR3(figurelightradius, figurelightradius, -SHADOWHEIGHT_MIN)
+		,D3DXVECTOR3(0, 0, -1), D3DCOLOR_ARGB(0,255,255,255) , 1.0f, 0.0f }
+		,{ D3DXVECTOR3(figurelightradius, -figurelightradius, -SHADOWHEIGHT_MIN)
+		,D3DXVECTOR3(0, 0, -1), D3DCOLOR_ARGB(0,255,255,255) , 1.0f, 1.0f }
 	};
 	//三角索引序列
 	WORD index[6] =
@@ -116,8 +127,9 @@ void WViewer::SetFigure()
 	memcpy(pIndex, index, sizeof(index));
 	figurelight->UnlockIndexBuffer();
 
-
-	D3DXCreateTextureFromFile(device, L"..\\light.jpg", &g_Texture);
+	if (g_Texture)
+		g_Texture->Release();
+	D3DXCreateTextureFromFile(device, L"..\\light23.png", &g_Texture);
 }
 
 bool WViewer::SetDevice(LPDIRECT3DDEVICE9 device)
@@ -337,6 +349,9 @@ void WViewer::KeyControlUp(int key)
 		break;
 	case VK_SHIFT:
 		shiftdown = false;
+		break;
+	case 'T':
+		flashlight = !flashlight;
 		break;
 	default:
 		break;

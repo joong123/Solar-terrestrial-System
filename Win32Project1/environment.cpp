@@ -88,8 +88,8 @@ void Environment::InitMaterialLight()
 	ZeroMemory(&light0, sizeof(D3DLIGHT9));
 	light0.Type = D3DLIGHT_POINT;
 	light0.Range = 3000.0f;
-	light0.Diffuse = { 1.0f, 1.0f, 0.9f, 1.0f };
-	light0.Ambient = { 0.1f, 0.1f, 0.1f, 0.3f };
+	light0.Diffuse = { 0.8f, 0.8f, 0.6f, 1.0f };
+	light0.Ambient = { 0.2f, 0.2f, 0.2f, 0.3f };
 	light0.Specular = { 0.6f, 0.6f, 0.6f, 1.0f };
 	light0.Position = D3DXVECTOR3(-500.0f, 0.0f, -500.0f);
 	light0.Attenuation0 = 0.0f;
@@ -105,10 +105,10 @@ void Environment::InitMaterialLight()
 		&matShadow,
 		&sunLight,
 		&groundPlane);//设置阴影矩阵
-	D3DXMATRIXA16 elevate;
-	D3DXMatrixIdentity(&elevate);
-	D3DXMatrixTranslation(&elevate, 0, 0, groundPlane.d);//阴影抬高
-	matShadow = elevate*matShadow;
+	/*D3DXMATRIXA16 shadowbias;
+	D3DXMatrixIdentity(&shadowbias);*/
+	//D3DXMatrixTranslation(&shadowbias, 0, 0, groundPlane.d);//阴影抬高，用depthbias代替
+	//matShadow = shadowbias*matShadow;
 	shadowchanged = true;//阴影改变标志
 
 	//阴影材质

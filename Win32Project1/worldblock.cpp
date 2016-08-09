@@ -7,6 +7,8 @@ WBlocker::WBlocker()
 	blockradius = BLOCKRADIUS;
 	blockrange = BLOCKRANGE;
 
+	blockindex = { 0, 0 };
+
 	blockmode = BLOCKMODE_PLANE;
 
 	generalmesh = NULL;

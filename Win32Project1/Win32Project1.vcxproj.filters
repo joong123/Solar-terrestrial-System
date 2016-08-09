@@ -75,8 +75,5 @@
     <Image Include="Win32Project1.ico">
       <Filter>资源文件</Filter>
     </Image>
-    <Image Include="..\light.jpg">
-      <Filter>资源文件</Filter>
-    </Image>
   </ItemGroup>
 </Project>

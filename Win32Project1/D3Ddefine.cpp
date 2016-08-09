@@ -4,7 +4,7 @@
 void CreateSphere(ID3DXMesh ** obj, int finess, float radius, D3DCOLOR color)
 {
 	//球形
-	const int loops = 10;//球精细度（180度内的环数）
+	const int loops = 4;//球精细度（180度内的环数）
 	float loopradian = D3DX_PI / loops;
 	int point = 0;
 	const int pointcount = 2 + (loops - 1)*loops * 2;
