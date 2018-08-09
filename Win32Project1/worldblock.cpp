@@ -1,18 +1,13 @@
 #include "stdafx.h"
 #include "worldblock.h"
 
-WBlocker::WBlocker()
+WBlocker::WBlocker()	:blockradius(BLOCKRADIUS),
+						blockrange(BLOCKRANGE),
+						blockmode(BLOCKMODE_PLANE),
+						generalmesh(NULL),
+						signmesh(NULL)
 {
 	D3DXMatrixIdentity(&matWorld);
-	blockradius = BLOCKRADIUS;
-	blockrange = BLOCKRANGE;
-
-	blockindex = { 0, 0 };
-
-	blockmode = BLOCKMODE_PLANE;
-
-	generalmesh = NULL;
-	signmesh = NULL;
 }
 
 WBlocker::~WBlocker()
@@ -35,13 +30,13 @@ bool WBlocker::SetGBlock()
 	CUSTOMVERTEX1 g_vertices[4] =
 	{
 		{ D3DXVECTOR3(-blockradius, -blockradius, 0.0f),
-			D3DXVECTOR3(0.0f, 0.0f, -1.0f), COLOR_GROUND2 }
+			D3DXVECTOR3(0.0f, 0.0f, -1.0f), COLOR_GROUND4 }
 		,{ D3DXVECTOR3(blockradius, blockradius, 0.0f),
-			D3DXVECTOR3(0.0f, 0.0f, -1.0f),COLOR_GROUND2 }
+			D3DXVECTOR3(0.0f, 0.0f, -1.0f),COLOR_GROUND4 }
 		,{ D3DXVECTOR3(-blockradius, blockradius, 0.0f),
-			D3DXVECTOR3(0.0f, 0.0f, -1.0f), COLOR_GROUND2 }
+			D3DXVECTOR3(0.0f, 0.0f, -1.0f), COLOR_GROUND4 }
 		,{ D3DXVECTOR3(blockradius, -blockradius, 0.0f),
-			D3DXVECTOR3(0.0f, 0.0f, -1.0f), COLOR_GROUND2 }
+			D3DXVECTOR3(0.0f, 0.0f, -1.0f), COLOR_GROUND4 }
 	};
 	//三角索引序列
 	WORD index[6] =
@@ -71,8 +66,8 @@ bool WBlocker::SetGBlock()
 
 
 	ZeroMemory(&blockmtrl, sizeof(D3DMATERIAL9));
-	blockmtrl.Diffuse = { 0.35f, 1.0f, 0.12f, 0.5f };//漫反射
-	blockmtrl.Ambient = { 0.35f, 1.0f, 0.12f, 1.0f };//环境光
+	blockmtrl.Diffuse = { 0.55f, 1.0f, 0.12f, 1.0f };//漫反射
+	blockmtrl.Ambient = { 0.55f, 1.0f, 0.12f, 1.0f };//环境光
 	blockmtrl.Specular = { 0.0f, 0.0f, 0.0f, 0.0f };//镜面反射
 	//blockmtrl.Emissive={ 1.0f, 1.0f, 1.0f, 1.0f };//自发光
 	blockmtrl.Power = 1.0f;

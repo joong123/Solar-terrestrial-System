@@ -1,14 +1,30 @@
 #include "stdafx.h"
 #include "environment.h"
 
-Environment::Environment()
+Environment::Environment():	device(NULL),
+							skyback(NULL),
+							sun(NULL), 
+							basetimezone(8),
+							baselongitude(LONGITUDE_SHANGHAI),
+							baselatitude(LATITUDE_SHANGHAI),
+							skyradius(SKYRADIUS),
+							hangle(0.0f),
+							vangle(0.0f),
+							thisyear(1900),
+							ydays(365),
+							yearpassed(0.0),
+							daypassed(0.0),
+							declination_general(-ECLIPTICOBLIQUITY_R),
+							declination_precise(-ECLIPTICOBLIQUITY_R),
+							yearangle(0.0),
+							yearvector(D3DXVECTOR3(1.0f, 0.0f, 0.0f)),
+							backnormal(yearvector),
+							basenormal(backnormal),
+							basedirectionEW(D3DXVECTOR3(0.0f, -1.0f, 0.0f)),
+							groundnormal(basenormal),
+							grounddirectionEW(basedirectionEW)
 {
-	device = NULL;
-	//D3DXMatrixIdentity(&matworld);
-
-	skyback = NULL;
-	sun = NULL;
-	skyradius = SKYRADIUS;
+	D3DXMatrixIdentity(&matworld);
 }
 
 Environment::~Environment()
@@ -28,27 +44,28 @@ bool Environment::InitSkyBack()
 		return false;
 
 	//顶点序列
+	float under = 20.0f;
 	CUSTOMVERTEX2 g_vertices[8] =
 	{
-		{ D3DXVECTOR3(-skyradius, -skyradius, 20.0f), COLOR_SKY1 }
-		,{ D3DXVECTOR3(-skyradius, skyradius, 20.0f), COLOR_SKY1 }
+		{ D3DXVECTOR3(-skyradius, -skyradius, under), COLOR_SKY1 }
+		,{ D3DXVECTOR3(-skyradius, skyradius, under), COLOR_SKY1 }
 		,{ D3DXVECTOR3(-skyradius, skyradius, -skyradius), COLOR_SKY2 }
 		,{ D3DXVECTOR3(-skyradius, -skyradius, -skyradius), COLOR_SKY2 }
 
 
-		,{ D3DXVECTOR3(skyradius, -skyradius, 20.0f), COLOR_SKY1 }
-		,{ D3DXVECTOR3(skyradius, skyradius, 20.0f), COLOR_SKY1 }
+		,{ D3DXVECTOR3(skyradius, -skyradius, under), COLOR_SKY1 }
+		,{ D3DXVECTOR3(skyradius, skyradius, under), COLOR_SKY1 }
 		,{ D3DXVECTOR3(skyradius, skyradius, -skyradius), COLOR_SKY2 }
 		,{ D3DXVECTOR3(skyradius, -skyradius, -skyradius), COLOR_SKY2 }
 	};
 	//三角索引序列
 	WORD index[30] =
 	{
-		0, 2, 1, 0, 3, 2//x-
-		,4, 5, 6, 4, 6, 7//x+
-		,0, 4, 7, 0, 7, 3//y-
-		,1, 6, 5, 1, 2, 6//y+
-		,3, 7, 6, 3, 6, 2//上
+		0, 2, 1, 0, 3, 2	//x-
+		,4, 5, 6, 4, 6, 7	//x+
+		,0, 4, 7, 0, 7, 3	//y-
+		,1, 6, 5, 1, 2, 6	//y+
+		,3, 7, 6, 3, 6, 2	//上
 	};
 
 	void* pVertices = NULL;
@@ -70,62 +87,53 @@ bool Environment::InitSkyBack()
 	memcpy(pIndex, index, sizeof(index));
 	skyback->UnlockIndexBuffer();
 
-
 	return true;
 }
 
-void Environment::InitMaterialLight()
+void Environment::InitMaterialLight(const double &longitude, const double &latitude)
 {
-	CreateSphere(&sun, 15, 50, COLOR_SUN);
+	CreateSphere(&sun, 15, SUNRADIUS, COLOR_SUN, 0.0f);
 
-	ZeroMemory(&material0, sizeof(D3DMATERIAL9));
-	material0.Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };//漫反射
-	material0.Ambient = { 1.0f, 1.0f, 1.0f, 0.1f };//环境光
-	material0.Specular = { 0.0f, 0.0f, 0.0f, 0.0f };//镜面反射
+	//ZeroMemory(&material0, sizeof(D3DMATERIAL9));
+	//material0.Diffuse = { 1.0f, 1.0f, 1.0f, 1.0f };//漫反射
+	//material0.Ambient = { 1.0f, 1.0f, 1.0f, 0.1f };//环境光
+	//material0.Specular = { 0.0f, 0.0f, 0.0f, 0.0f };//镜面反射
 	//material0.Emissive={ 1.0f, 1.0f, 1.0f, 1.0f };//自发光
-	material0.Power = 1.0f;
+	//material0.Power = 1.0f;
 
+	//阳光
 	ZeroMemory(&light0, sizeof(D3DLIGHT9));
-	light0.Type = D3DLIGHT_POINT;
+	light0.Type = D3DLIGHT_DIRECTIONAL;//TODO:D3DLIGHT_DIRECTIONAL
 	light0.Range = 3000.0f;
-	light0.Diffuse = { 0.8f, 0.8f, 0.6f, 1.0f };
-	light0.Ambient = { 0.2f, 0.2f, 0.2f, 0.3f };
-	light0.Specular = { 0.6f, 0.6f, 0.6f, 1.0f };
-	light0.Position = D3DXVECTOR3(-500.0f, 0.0f, -500.0f);
+	light0.Diffuse = { sunlightD.r, sunlightD.g, sunlightD.b, 1.0f };
+	light0.Ambient = { sunlightA.r, sunlightA.g, sunlightA.b, 1.0f };
+	//light0.Specular = { 0.6f, 0.6f, 0.6f, 1.0f };
 	light0.Attenuation0 = 0.0f;
-	light0.Attenuation1 = 0.001f;
-	
-	//太阳矩阵
-	sunLight = D3DXVECTOR4(light0.Position, 1);//设置全局太阳位置
-	D3DXMatrixIdentity(&sunTranslation);
-	D3DXMatrixTranslation(&sunTranslation, sunLight.x, sunLight.y, sunLight.z);
-	matSun = ViewTranslation * sunTranslation;
-	//阴影矩阵
-	D3DXMatrixShadow(
-		&matShadow,
-		&sunLight,
-		&groundPlane);//设置阴影矩阵
-	/*D3DXMATRIXA16 shadowbias;
-	D3DXMatrixIdentity(&shadowbias);*/
-	//D3DXMatrixTranslation(&shadowbias, 0, 0, groundPlane.d);//阴影抬高，用depthbias代替
-	//matShadow = shadowbias*matShadow;
-	shadowchanged = true;//阴影改变标志
+	light0.Attenuation1 = 0.0025f;
+	//侧面阳光
+	light0s = light0;
+	light0s.Ambient = { 0.0f, 0.0f, 0.0f, 1.0f };
+	light0n = light0;
+	light0n.Ambient = { 0.0f, 0.0f, 0.0f, 1.0f };
 
 	//阴影材质
 	ZeroMemory(&shadowmtrl, sizeof(D3DMATERIAL9));
-	shadowmtrl.Ambient = { 0.0f,0.0f,0.0f,0.0f };
-	shadowmtrl.Diffuse = { 0.0f,0.0f,0.0f,0.2f };// 50% transparency.
+	/*shadowmtrl.Ambient = { 0.0f,0.0f,0.0f,0.0f };
+	shadowmtrl.Diffuse = { 0.0f,0.0f,0.0f, MAXSHADOWINTENSITY };
 	shadowmtrl.Emissive = { 0.0f,0.0f,0.0f,0.0f };
-	shadowmtrl.Specular = { 0.0f,0.0f,0.0f,0.0f };
-	shadowmtrl.Power = 1.0f;
+	shadowmtrl.Specular = { 0.0f,0.0f,0.0f,0.0f };*/
 
-	/*light1.Phi = D3DX_PI / 4.0;
-	light1.Theta = D3DX_PI / 8.0f;
-	light1.Falloff = 1.0f;*/
-	//light1.Direction = D3DXVECTOR3(0, 0, 1);
+	time(&nowtime);//获得实时时间
+	SetTime(longitude);//根据经度调整时间
+	SunMove(latitude);
+	setPos();
 
 	device->SetLight(0, &light0);
+	device->SetLight(1, &light0s);
+	device->SetLight(2, &light0n);
 	device->LightEnable(0, TRUE);
+	device->LightEnable(1, TRUE);
+	device->LightEnable(2, TRUE);
 }
 
 

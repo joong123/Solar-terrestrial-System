@@ -4,20 +4,29 @@
 WViewer::WViewer():	device(NULL),
 					figure(NULL),
 					g_Texture(NULL),
-					pos(D3DXVECTOR3(0.0f, 0.0f, 0.0f)),
-					figureeye(D3DXVECTOR3(0.3f, 0.0f, -0.4f)),
+					viewpos_d(DoubleVec3(0.0, 0.0, 0.0)),
+					displacement(DoubleVec3(0.0, 0.0, 0.0)),
+					baselongitude(LONGITUDE_SHANGHAI),
+					baselatitude(LATITUDE_SHANGHAI),
+					figurelongitude(baselongitude),
+					figurelatitude(baselatitude),
+					longitude(LONGITUDE_SHANGHAI),
+					latitude(LATITUDE_SHANGHAI),
+					pos_d(DoubleVec3(0.0, 0.0, 0.0)),
+					inblockpos(D3DXVECTOR3(0.0, 0.0, 0.0)),
+					figureeye(D3DXVECTOR3(0.3f, 0.0f, -0.08f)),
 					figurehangle(0.0f),
 					figurevangle(0.0f),
-					//viewpos(D3DXVECTOR3(0.0f, 0.0f, 0.0f)),
 					hAngle(0.0f),
 					vAngle(0.0f),
-					displacement(D3DXVECTOR3(0.0f, 0.0f, 0.0f)),
 					viewdirection(D3DXVECTOR3(1.0f, 0.0f, 0.0f)),
+					eye(D3DXVECTOR3(0.0f, 0.0f, 0.0f)),
 					at(D3DXVECTOR3(1.0f, 0.0f, 0.0f)),
 					up(D3DXVECTOR3(0.0f, 1.0f, 0.0f)),
-					viewangle(D3DX_PI / 3),
+					viewangle(DEFAULTFOVY),
 					viewaspect(1.0f),
 					speed(0.0f),
+					speedrate(1.0f),
 					remnantspeedmode(REMNANTSPEEDMODE_SMOOTH),
 					curdirection(DIRECTION_NONE),
 					lastdirection(DIRECTION_NONE),
@@ -27,42 +36,53 @@ WViewer::WViewer():	device(NULL),
 					ddown(false),
 					shiftdown(false),
 					viewradius(VIEWRADIUS),
-					sensitivity(0.0015f),
+					sensitivity(DEFAULTSENSITIVITY),
 					hcos(1.0f),
 					hsin(0.0f),
 					vcos(1.0f),
 					vsin(0.0f),
-					flashlight(true)
+					flashlight(false),
+					viewchanged(true),
+					figuremoved(true),
+					eyehmoved(true),
+					bindview(true)
 {
+	pos_d = DoubleVec3(0.0, 0.0, 0.0);
+
+	displacement = DoubleVec3(0.0, 0.0, 0.0);
+
 	//初始化位置，矩阵
-	D3DXMatrixIdentity(&matTranslation);
-	D3DXMatrixTranslation(&matTranslation, pos.x, pos.y, pos.z);
-	D3DXMatrixIdentity(&matTranslation2);
-	D3DXMatrixTranslation(&matTranslation2, pos.x + TINYBIAS, pos.y, 0);
+	/*D3DXMatrixIdentity(&matTranslation);
+	D3DXMatrixTranslation(&matTranslation, (float)pos_d.x, (float)pos_d.y, (float)pos_d.z);*/
+	/*D3DXMatrixIdentity(&matTranslation2);
+	D3DXMatrixTranslation(&matTranslation2, pos_d.x + TINYBIAS, pos_d.y, 0);*/
 	D3DXMatrixIdentity(&matHRotate);
 	D3DXMatrixRotationZ(&matHRotate, figurehangle);
 	D3DXMatrixIdentity(&matWorld);
+	//D3DXMatrixIdentity(&inblockTranslation);
+	//D3DXMatrixTranslation(&inblockTranslation, inblockpos.x, inblockpos.y, 0.0f);//z方向不平移
 
 	QueryPerformanceFrequency(&frequency);
-	endtick.QuadPart = 0;
-	lasttick.QuadPart = 0;
+	endtick = { 0 };
+	lasttick = { 0 };
 
 	SetViewmode(VIEWMODE_CHASE);
 
-	//初始化全局眼睛位置矩阵，平移矩阵
-	blockindex = { 0, 0 };
-	viewpos = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
-	D3DXMatrixIdentity(&ViewTranslation);
-	D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, viewpos.z);
+
+	if (latitude == MYPI / 2)
+		earthhangle = 3 * MYPI / 2;
+	else if (latitude == -MYPI / 2)
+		earthhangle = MYPI / 2;
+	else
+		earthhangle = hAngle;//更新地球角度
 }
 
 WViewer::~WViewer()
 {
 }
 
-void WViewer::InitProj(float angle, float aspect)
+void WViewer::InitProj(float aspect)
 {
-	SetViewAngle(angle);
 	SetAspect(aspect);//设置viewer aspect
 	SetProj();//设置投影
 }
@@ -73,8 +93,7 @@ void WViewer::SetFigure()
 		return;
 
 	//球形
-	CreateSphere(&figure, 15, 0.1, COLOR_FIGURE1);
-	
+	CreateSphere(&figure, 15, 0.04f, COLOR_FIGURE1, 0.04f);
 
 
 	// shadow position 
@@ -91,7 +110,7 @@ void WViewer::SetFigure()
 
 	//figurelight
 
-	float figurelightradius = 0.8f;
+	float figurelightradius = 0.4f;
 	CUSTOMVERTEX3 g_vertices[4] =
 	{
 		{ D3DXVECTOR3(-figurelightradius, -figurelightradius, -SHADOWHEIGHT_MIN)
@@ -108,7 +127,8 @@ void WViewer::SetFigure()
 	{
 		0, 1, 2
 		,0, 2, 3
-	}; void* pVertices = NULL;
+	}; 
+	void* pVertices = NULL;
 	void* pIndex = NULL;
 	HRESULT hr;
 
@@ -161,41 +181,35 @@ bool WViewer::SetAspect(float aspect)
 	}
 }
 
-bool WViewer::SetViewmode(int mode)
+void WViewer::SetViewmode(int mode)
 {
-	if (viewmode == mode)
-		return false;
-	else
+	viewmode = mode;
+	switch (viewmode)//初始化vAngle
 	{
-		viewmode = mode;
-		switch (viewmode)//初始化vAngle
-		{
-		case VIEWMODE_FIRSTPERSON:
-			vAngle = 0.0f;
-			break;
-		case VIEWMODE_CHASE:
-			vAngle = 0.0f;
-			break;
-		case VIEWMODE_FREE:
-			break;
-		case VIEWMODE_OVERLOOK:
-			viewpos = pos + D3DXVECTOR3(0.0f, 0.0f, -overlookscreenheight);
-			vAngle = -D3DX_PI / 2;
-			break;
-		}
-		//更新三角值
-		hcos = cos(hAngle);
-		hsin = sin(hAngle);
-		vsin = sin(vAngle);
-		vcos = cos(vAngle);
-		viewdirection = D3DXVECTOR3(hcos*vcos, hsin*vcos, -vsin);
-
-		SetViewVector();
-		//SetView();
-		viewchanged = true;//设置视角更新标志
-
-		return true;
+	case VIEWMODE_FIRSTPERSON:
+		vAngle = 0.0f;
+		eyehmoved = true;
+		bindview = true;
+		break;
+	case VIEWMODE_CHASE:
+		vAngle = 0.0f;
+		eyehmoved = true;
+		bindview = true;
+		break;
+	case VIEWMODE_FREE:
+		break;
+	case VIEWMODE_OVERLOOK:
+		vAngle = -MYPI / 2;
+		//viewpos_d = pos_d + DoubleVec3(0.0, 0.0, -overlookscreenheight);
+		viewpos_d.z = -overlookscreenheight;
+		eyehmoved = true;
+		break;
 	}
+	//更新三角值
+	Refreshtri();
+
+	figuremoved = true;
+	viewchanged = true;//设置视角更新标志
 }
 
 
@@ -206,8 +220,7 @@ bool WViewer::SetProj()
 	else
 	{
 		D3DXMATRIXA16 proj;
-		D3DXMatrixPerspectiveFovLH(&proj, viewangle,
-			viewaspect, PERSPECTIVEZNEAR_MIN, viewradius);
+		D3DXMatrixPerspectiveFovLH(&proj, viewangle, viewaspect, PERSPECTIVEZNEAR_MIN, viewradius);
 		device->SetTransform(D3DTS_PROJECTION, &proj);
 
 		return true;
@@ -292,30 +305,56 @@ bool WViewer::KeyControlDown(int key)
 		ChangeViewmode();
 		break;
 	case 'H':
-		vAngle = 0.0f;
-		SetViewVector();
-		SetView();
+		vAngle = 0.0f; 
+		Refreshtri();
+		if (viewmode == VIEWMODE_CHASE || viewmode == VIEWMODE_FIRSTPERSON)
+		{
+			//moved = true;
+			bindview = true;
+			eyehmoved = true;
+		}
+		viewchanged = true;
 		break;
 		break;
 	case 'R'://视角回复
-		hAngle = 0.0f;
-		SetViewVector();
-		SetView();
+		//转动到8个方位中最接近的一个方位
+		hAngle = (int)((hAngle + MYPI / 8) / MYPI * 4)*MYPI / 4;
+		figurehangle = hAngle;
+		earthhangle = (int)((earthhangle + MYPI / 8) / MYPI * 4)*MYPI / 4;
+		Refreshtri();
+		if (viewmode == VIEWMODE_CHASE || viewmode == VIEWMODE_FIRSTPERSON)
+		{
+			//moved = true;
+			bindview = true;
+			eyehmoved = true;
+			figuremoved = true;
+		}
+		viewchanged = true;
+		break;
+	case 'T':
+		flashlight = !flashlight;
 		break;
 	case VK_SHIFT:
+		speedrate = 105250.0f;
 		shiftdown = true;
 		break;
 	case 'C'://下降
 		if (viewmode == VIEWMODE_FREE || viewmode == VIEWMODE_OVERLOOK)
 		{
-			viewpos.z += 0.03f;
+			viewpos_d.z += 0.03f; 
+			//moved = true;
+			//eyehmoved = true;//眼睛位置在水平方向上未改变
 		}
+		viewchanged = true;
 		break;
 	case VK_SPACE://上升
 		if (viewmode == VIEWMODE_FREE || viewmode == VIEWMODE_OVERLOOK)
 		{
- 			viewpos.z -= 0.03f;
+			viewpos_d.z -= 0.03f;
+			//moved = true;
+			//eyehmoved = true;
 		}
+		viewchanged = true;
 		break;
 	default:
 		return false;
@@ -348,10 +387,8 @@ void WViewer::KeyControlUp(int key)
 		DirectionControl();
 		break;
 	case VK_SHIFT:
+		speedrate = 1.0f;
 		shiftdown = false;
-		break;
-	case 'T':
-		flashlight = !flashlight;
 		break;
 	default:
 		break;

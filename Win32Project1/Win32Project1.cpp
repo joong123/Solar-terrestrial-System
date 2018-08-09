@@ -51,6 +51,19 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			DispatchMessage(&msg);
 		}
 
+		//实时日期 & 时间
+		time(&nowtime); 
+		if (nowtime != lasttime)
+		{
+			TIME_ZONE_INFORMATION tzi;
+			GetTimeZoneInformation(&tzi);
+			devicetimezone = tzi.Bias / -60;//设备时区
+			_tzset();//更新时区，防止localtime()不更新
+
+			gmtime_s(&dateGMT, &nowtime);//格林威治时间
+			localtime_s(&devicedate, &nowtime);//转换设备时间
+		}
+		
 		//窗口是否最小化 TODO：利用消息机制
 		if (IsIconic(mainwnd))
 		{
@@ -99,11 +112,10 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
 		//更新帧率
 		QueryPerformanceCounter(&etime);//记录结束时间
-		if ((loopcount & 0xff) == 0)//每过n次计数计算fps
+		if (nowtime != lasttime)//按秒计算fps
 		{
 			if (etime.QuadPart != stime.QuadPart)
-				fps = (double)frequency.QuadPart
-				/ (double)(etime.QuadPart - stime.QuadPart);
+				fps = (float)frequency.QuadPart / (etime.QuadPart - stime.QuadPart);
 
 			float rate = 0.05f;
 			if (avgfps == -1)//平均帧率
@@ -111,18 +123,20 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			else
 				avgfps = avgfps*(1 - rate) + fps*rate;
 
-			if (frametime == -1)//平均帧时间
-				frametime = (double)(etime.QuadPart - stime2.QuadPart)
-				/ (double)frequency.QuadPart;
+			frametime = (float)(etime.QuadPart - stime2.QuadPart) / frequency.QuadPart;
+			if (avgframetime == -1)//平均帧时间
+				avgframetime = frametime;
 			else
-				frametime = frametime*(1 - rate) +
-				(double)(etime.QuadPart - stime2.QuadPart)
-				/ (double)frequency.QuadPart*rate;
+				avgframetime = avgframetime*(1 - rate) + frametime*rate;
 
-			swprintf_s(title, L"world %.1f / %.1ffps", fps, avgfps);
+			swprintf_s(title, L"world %.1f / %.1ffps %lld", fps, avgfps, lasttime);
 			SetWindowText(mainwnd, title);
 		}
 		stime.QuadPart = etime.QuadPart;//记录开始时间
+
+
+		lasttime = nowtime;//存储当前时间为上一时间
+		//lastdate = nowdate;
 	}
 
 	return (int)msg.wParam;
@@ -173,10 +187,10 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	//设置初始窗口大小
 	screenwidth = GetSystemMetrics(SM_CXSCREEN);
 	screenheight = GetSystemMetrics(SM_CYSCREEN);
-	float wndscale = 0.6;
+	float wndscale = 0.6f;
 	HWND hWnd = CreateWindowW(szWindowClass, szTitle, WS_OVERLAPPEDWINDOW,
-		screenwidth*(1 - wndscale) / 2, screenheight*(1 - wndscale) / 2
-		, screenwidth*wndscale, screenheight*wndscale, nullptr, nullptr, hInstance, nullptr);
+		(int)(screenwidth*(1 - wndscale) / 2), (int)(screenheight*(1 - wndscale) / 2)
+		, (int)(screenwidth*wndscale), (int)(screenheight*wndscale), nullptr, nullptr, hInstance, nullptr);
 
 	if (!hWnd)
 	{
@@ -194,19 +208,15 @@ BOOL InitInstance(HINSTANCE hInstance, int nCmdShow)
 	D3DInit(hWnd, D3DMULTISAMPLE_16_SAMPLES);//D3D初始化
 
 	//D3D内容初始化
-	moved = true;
-	viewchanged = true;//设置视角更新参数
-	shadowchanged = true;
 	viewer.SetViewmode(VIEWMODE_CHASE);
 
 	//创建子线程
-	tp.start = &startthread;
-	tp.pclientcenter = &clientcenter;
-	tp.pviewer = &viewer;
-	tp.pcontrolmode = &controlmode;
+	//tp.start = &startthread;
+	//tp.pclientcenter = &clientcenter;
+	//tp.pviewer = &viewer;
+	//tp.pcontrolmode = &controlmode;
 	//InitializeCriticalSection(&cs);
 	//hThread = CreateThread(NULL, 0, ThreadProc, &tp, 0, &threadID); // 创建线程
-	
 
 	return TRUE;
 }
@@ -225,7 +235,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
 	char key;
 	int key_state;
-	POINT cur, bias;
 	bool keyvalid;
 
 	switch (message)
@@ -339,10 +348,10 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			invalidkey = key;
 			QueryPerformanceCounter(&invalidtime);
 		}
-		//if (key == 'T')//测试字符显示
-		//	testchar++;
-		//else if (key == 'R')
-		//	testchar--;
+		if (key == 'B')//测试字符显示
+			testchar++;
+		else if (key == 'G')
+			testchar--;
 		break;
 	case WM_KEYUP:
 		key = wParam;
@@ -367,6 +376,9 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 			SetCursor(LoadCursor(NULL, IDC_ARROW));
 		break;
 	case WM_SIZE:
+		WCHAR title[50];
+		swprintf_s(title, L"world %.1f / %.1ffps %lld", fps, avgfps, lasttime);
+		SetWindowText(mainwnd, title);
 		Get2WndRect();//更新窗口区域
 		if (controlmode == CONTROLMODE_CAPTURE)
 			ClipCursor(&clientrect);//重新设置捕获区域
@@ -426,6 +438,10 @@ void Init()
 	focused = GetForegroundWindow() == mainwnd;
 	Get2WndRect();
 	originwndrect = wndrect;
+	time(&lasttime);
+	localtime_s(&lastdate, &lasttime);
+	time(&nowtime);
+	localtime_s(&devicedate, &nowtime);
 	//mainwnd;screenwidth;screenheight;//窗口句柄、屏幕长宽在InitInstance中获得
 
 	//运行信息初始化
@@ -435,7 +451,7 @@ void Init()
 	fps = -1.0f;
 	avgfps = -1.0f;//needed < 0
 	fpslimit = -1.0f;
-	frametime = -1.0f;
+	avgframetime = -1.0f;
 	invalidkey = 0;//needed 0
 	memory1 = 0.0f;
 	memory2 = 0.0f;
@@ -457,12 +473,14 @@ void Init()
 	else
 		CaptureControl();
 	//初始化信息显示策略
-	infoshow = false;
-	otherinfoshow = false;
 	fpsshow = true;
+	infoshow = true;
+	otherinfoshow = true;
 	UpdateStatusStr();//初始化状态显示字符串
 
 	SetTextRect();//设置文字显示区域
+
+	anti = false;
 }
 
 bool FullScreen(bool tofull)
@@ -502,11 +520,11 @@ bool FullScreen(bool tofull)
 	else//取消全屏
 	{
 		//显示任务栏
-		/*HWND hwnd;
+		HWND hwnd;
 		hwnd = FindWindow(L"Shell_TrayWnd", NULL);
 		ShowWindow(hwnd, SW_SHOW);
 		hwnd = GetDlgItem(FindWindow(L"Shell_TrayWnd", NULL), 0x130);
-		ShowWindow(hwnd, SW_SHOW);*/
+		ShowWindow(hwnd, SW_SHOW);
 
 		LONG tmp = GetWindowLong(mainwnd, GWL_STYLE);
 		tmp |= WS_POPUPWINDOW;
@@ -583,15 +601,14 @@ void D3DInit(HWND wnd, D3DMULTISAMPLE_TYPE ms)
 	//viewer
 	viewer.SetDevice(device);
 	viewer.SetFigure();
-	viewer.InitProj(D3DX_PI / 3
-		, (float)(clientrect.right - clientrect.left) / (float)(clientrect.bottom - clientrect.top));
+	viewer.InitProj((float)(clientrect.right - clientrect.left) / (clientrect.bottom - clientrect.top));
 	//blocker
 	blocker.SetDevice(device);
 	blocker.SetGBlock();
 	//environment
 	environment.SetDevice(device);
 	environment.InitSkyBack();
-	environment.InitMaterialLight();
+	environment.InitMaterialLight(viewer.longitude, viewer.latitude);
 
 	depthbias = DEPTHBIAS;
 	sdepthbias = SLOPESCALEDEPTHBIAS;
@@ -715,22 +732,23 @@ void DeviceInit()
 
 void SetTextRect()
 {
-	//text4, 11未使用
+	//text3, 4, 11未使用
 
-	int margin = 2, rowmargin = 6;//边缘量
-	int rowscreenheight = 16, rowwidth = 200;//行高，行宽
+	const int margin = 2, rowmargin = 6, bottommargin = 4;//边缘量
+	const int rowscreenheight = 16, rowwidth = 200;//行高，行宽
 	text.top = margin;//顶部左侧
 	text.bottom = text.top + rowscreenheight;
 	text.left = rowmargin;
 	text.right = text.left + 300;
+	const int multirows = 8;
 	text2.top = text.bottom;//向下接text
-	text2.bottom = text2.top + 4*rowscreenheight;
+	text2.bottom = text2.top + multirows*rowscreenheight;
 	text2.left = rowmargin;
 	text2.right = text2.left + rowwidth;
-	text3.top = text2.bottom;//向下接text2
-	text3.bottom = text3.top + rowscreenheight;
-	text3.left = rowmargin;
-	text3.right = text3.left + rowwidth;
+	//text3.top = text2.bottom;//向下接text2
+	//text3.bottom = text3.top + rowscreenheight;
+	//text3.left = rowmargin;
+	//text3.right = text3.left + rowwidth;
 
 	text5.bottom = clientrect.bottom - clientrect.top - margin;//底部左侧
 	text5.top = text5.bottom - rowscreenheight;
@@ -744,10 +762,16 @@ void SetTextRect()
 	text12.top = text12.bottom - rowscreenheight;
 	text12.left = (wndrect.right - wndrect.left) / 2 - rowwidth / 2 - 40;
 	text12.right = text12.left + 40;
-	text7.bottom = clientrect.bottom - clientrect.top - margin;//底部右侧
-	text7.top = text7.bottom - rowscreenheight;
+	const int timerows = 9;
+	text7.bottom = clientrect.bottom - clientrect.top - bottommargin;//底部右侧
+	text7.top = text7.bottom - timerows * rowscreenheight;
 	text7.right = clientrect.right - clientrect.left - rowmargin;
 	text7.left = text7.right - 200;
+	//特殊字符显示
+	text11.bottom = text7.bottom - 18;//底部右侧
+	text11.top = text7.bottom - 31;
+	text11.right = text7.left + 19;
+	text11.left = text7.left - 20;
 
 
 	text8.top = margin;//顶部右侧
@@ -783,13 +807,11 @@ void ChangeMultiSample()
 	font2->Release();
 	font3->Release();
 	device->Release();
+
 	//重新创建D3D变量
 	D3DInit(mainwnd, (D3DMULTISAMPLE_TYPE)multisample);
 	//D3D内容初始化
-	moved = true;
-	viewchanged = true;//设置视角更新参数
-	shadowchanged = true;
-	//viewer.SetViewmode(VIEWMODE_CHASE);	//视角模式不需要重新设置
+	viewer.SetView();
 }
 
 void OnLostDevice()
@@ -814,20 +836,22 @@ void OnResetDevice(void)
 
 	DeviceInit();//设备参数初始化
 
-	//viewer
-	viewer.SetDevice(device);//给viewer传递device
+	//device地址没改变情况下，D3D内容初始化
 	viewer.SetView();//重置view变换
-	//重置投影变换
-	viewer.InitProj(D3DX_PI / 3, (float)(clientrect.right - clientrect.left) / (float)(clientrect.bottom - clientrect.top));
+
+	//viewer
+	//viewer.SetDevice(device);//给viewer传递device
+	//viewer.SetFigure();
+	viewer.InitProj((float)(clientrect.right - clientrect.left) / (clientrect.bottom - clientrect.top));//重置投影变换
 	
 	//blocker
-	blocker.SetDevice(device);
+	//blocker.SetDevice(device);
 	//blocker.SetGBlock();//不需要重新绘图
 
 	//environment
-	environment.SetDevice(device);
+	//environment.SetDevice(device);
 	//environment.InitSkyBack();//不需要重新绘图
-	environment.InitMaterialLight();
+	environment.InitMaterialLight(viewer.longitude, viewer.latitude);//设置材质与光照
 }
 
 void MainLoop()
@@ -840,35 +864,37 @@ void MainLoop()
 	if (controlmode == CONTROLMODE_CAPTURE)//处理视角旋转
 	{
 		GetCursorPos(&cursorpos);
+		SetCursorPos(clientcenter.x, clientcenter.y);//将指针重置到窗口中点
 
 		POINT bias = cursorpos;
 		bias.x -= clientcenter.x;
 		bias.y -= clientcenter.y;
-		viewer.Rotate(bias);//视角旋转
-		//将指针重置到窗口中点
-		SetCursorPos(clientcenter.x, clientcenter.y);
+		rotated = viewer.Rotate(bias);//视角旋转
 	}
 
+	viewer.ViewMove();//计算实时经纬度
+	//viewpos信息更新
+	if (viewer.bindview)
+		viewer.BindView();
 
-	if (moved)//更新全局平移矩阵，保持environment与眼睛相对位置不变
+	//环境按n秒变化
+	if (nowtime != lasttime || viewer.eyehmoved)
+		environment.SetTime(viewer.longitude);//根据经度调整时间
+	if (nowtime / 2 != lasttime / 2 || viewer.eyehmoved)
 	{
-		D3DXMatrixIdentity(&ViewTranslation);
-		D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, 0.0f);//z方向不平移
+		environment.SunMove(viewer.latitude);
+		environment.setPos();
+
+		viewer.eyehmoved = false;
 	}
-	if (shadowchanged || moved)
-		matSun = ViewTranslation * sunTranslation;//更新太阳矩阵，保持太阳与眼睛相对位置不变
 
 	// 视角处理，显示处理
-	if(viewchanged)
+	if (viewer.viewchanged)
+	{
+		viewer.RefreshView();//更新视角矩阵
 		viewer.SetView();//设置视角，并重置viewchanged为false
-	/*D3DVIEWPORT9 vp;
-	vp.X = 0;
-	vp.Y = 0;
-	vp.Width = clientrect.right - clientrect.left;
-	vp.Height = clientrect.bottom - clientrect.top;
-	vp.MinZ = 0.0f;
-	vp.MaxZ = 1.0f;
-	device->SetViewport(&vp);*/
+	}
+
 
 	// Clear the buffer.   
 	device->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, COLOR_CLEAR, 1.0f, 0);
@@ -880,20 +906,19 @@ void MainLoop()
 	device->SetRenderState(D3DRS_FOGENABLE, TRUE);//雾
 
 	//绘制
-	startthread = false;//结束子线程标志
+	//startthread = false;//结束子线程标志
 	
-	environment.Draw();
+	environment.Render();
 	if (viewer.viewmode == VIEWMODE_OVERLOOK)
 		device->SetRenderState(D3DRS_FOGENABLE, FALSE);//临时关闭雾,TODO
-	blocker.Draw();
-	viewer.Draw();
+	blocker.Render();
+	viewer.Render();
 
 	//重置标志
-	viewchanged = false;//重置view改变标志为false
-	moved = false;
-	shadowchanged = false;//重置阴影标志为false
+	//重置阴影标志为false
+	shadowchanged = false;
 
-	startthread = true;//开始子线程标志
+	//startthread = true;//开始子线程标志
 
 	//信息显示
 	if (fpsshow)
@@ -910,7 +935,7 @@ void MainLoop()
 	// Display the scene.  
 	//QueryPerformanceCounter(&stime);
 	hr = device->Present(NULL, NULL, NULL, NULL);
-	//QueryPerformanceCounter(&etime);//记录结束时间
+	//QueryPerformanceCounter(&etime);//单独记录present时间
 
 	// Render failed, try to reset device
 	if (hr == D3DERR_DEVICELOST)
@@ -926,7 +951,7 @@ void MainLoop()
 void FpsShow()
 {
 	//fps显示，扫描更新
-	swprintf_s(show, _T("FPS  %.1f/ %.1f  %.3fms  %lld"), fps, avgfps, frametime*1000., loopcount);
+	swprintf_s(show, _T("FPS  %.1f/ %.1f  %.3f/ %.3fms  %lld"), fps, avgfps, frametime*1000., avgframetime*1000., loopcount);
 	font->DrawText(NULL, show, -1, &text, DT_LEFT | DT_NOCLIP | DT_SINGLELINE, COLOR_WHITE);
 }
 
@@ -948,33 +973,140 @@ void UpdateStatusStr()
 
 void InfoShow()
 {
-	WCHAR show2[128] = { 0 };
+	WCHAR show2[512] = { 0 };
 	//pos显示，(扫描更新)
-	swprintf_s(show, _T("POS %.3f, %.3f, %.3f")
-		, viewer.pos.x, viewer.pos.y, viewer.pos.z);
-	//eye方位显示，(扫描更新)
-	swprintf_s(show2, _T("\n\rEYE %.3f, %.3f, %.3f")
-		, viewpos.x, viewpos.y, viewpos.z);
+	swprintf_s(show, _T("POS  %.3lf, %.3lf, %.3lf")
+		, viewer.pos_d.x, viewer.pos_d.y, viewer.pos_d.z);
+	//eye方位显示，(扫描更新)inblockTranslation
+	swprintf_s(show2, _T("\n\rEYE  %.6lf, %.6lf, %.6lf")
+		, viewer.viewpos_d.x, viewer.viewpos_d.y, viewer.viewpos_d.z);
 	wcscat_s(show, show2);
+	//inblockTranslation显示，(扫描更新)
+	/*swprintf_s(show2, _T("\n\rCLIP  %.6f, %.6f, %.6f")
+		, inblockpos->x, inblockpos->y, inblockpos->z);
+	wcscat_s(show, show2);*/
 	//视角显示，(扫描更新)
-	swprintf_s(show2, _T("\n\rH %.2f°, V %.2f°  \t%S")
+	swprintf_s(show2, _T("\n\rH %.2f°, V %.2f, EARTHH %.2f°  \t%S")
 		, viewer.hAngle * RADIAN2DEGREE, viewer.vAngle * RADIAN2DEGREE
-		, viewdirection[(int)(floor((viewer.hAngle + D3DX_PI / 8) / D3DX_PI * 4))]);
+		, viewer.earthhangle * RADIAN2DEGREE
+		, viewdirection[(int)((viewer.earthhangle + MYPI / 8) / MYPI * 4)]
+	);
+	if (abs((int)((viewer.earthhangle + MYPI / 8) / MYPI * 4)*MYPI / 4 - viewer.earthhangle)
+		<= ANGLE_NEARRANGE / RADIAN2DEGREE)
+		wcscat_s(show2, L"+");
 	wcscat_s(show, show2);
 	//位移显示，(扫描更新)
-	swprintf_s(show2, _T("\n\r∆ %.4f, %.4f, %.4f")
+	swprintf_s(show2, _T("\n\r∆  %.4f, %.4f, %.4f")
 		, viewer.displacement.x, viewer.displacement.y, viewer.displacement.z);
 	wcscat_s(show, show2);
 	//区块位置显示，(扫描更新)
-	swprintf_s(show2, _T("\n\rBLOCK %lld, %lld")
+	/*swprintf_s(show2, _T("\n\rBLOCK  %lld, %lld")
 		, blockindex.x, blockindex.y);
-	wcscat_s(show, show2);
-	font->DrawTextW(NULL, show, -1, &text2, DT_LEFT | DT_NOCLIP, COLOR_WHITE);//三行联合显示
-
+	wcscat_s(show, show2);*/
 	//viewmode、速度显示
-	swprintf_s(show, _T("VIEW %S    SPEED %.2f")
-		, viewer.GetViewmodeStr().c_str(), viewer.speed);
-	font->DrawTextW(NULL, show, -1, &text3, DT_LEFT | DT_NOCLIP, COLOR_GREY1);
+	swprintf_s(show2, _T("\n\rVIEW  %S    SPEED  %.2f  %.2fm/s")
+		, viewer.GetViewmodeStr().c_str(), viewer.speed, viewer.speed*viewer.speedrate / ONEMETER);
+	wcscat_s(show, show2);
+	//view参数
+	swprintf_s(show2, _T("\n\rVIEWANGLE  %.1f°  ASPECT  %.3f")
+		, viewer.viewangle * RADIAN2DEGREE, viewer.viewaspect);
+	wcscat_s(show, show2);
+
+
+	wcscat_s(show, L"\n\r");
+	double absradian = 0;
+	//经纬度显示
+	swprintf_s(show2, _T("\n\rLONGITUDE  %03d°%02d'%05.2f\"")
+		, GetRadianDValue(environment.baselongitude)
+		, GetRadianMValue(environment.baselongitude)
+		, GetRadianSValue(environment.baselongitude)
+	);
+	wcscat_s(show, show2);
+	swprintf_s(show2, _T("  LATITUDE  %02d°%02d'%05.2f\"")
+		, GetRadianDValue(environment.baselatitude)
+		, GetRadianMValue(environment.baselatitude)
+		, GetRadianSValue(environment.baselatitude)
+	);
+	wcscat_s(show, show2);
+	//实时经纬度显示
+	swprintf_s(show2, _T("\n\rlongitude  %02d°%02d'%05.2lf\"  latitude  %02d°%02d'%05.2lf\"  real:%16.13lf, %16.13lf")
+		, GetRadianDValue(viewer.longitude)
+		, GetRadianMValue(viewer.longitude)
+		, GetRadianSValue(viewer.longitude)
+		, GetRadianDValue(viewer.latitude)
+		, GetRadianMValue(viewer.latitude)
+		, GetRadianSValue(viewer.latitude)
+		, viewer.longitude * RADIAN2DEGREE
+		, viewer.latitude * RADIAN2DEGREE
+	);
+	wcscat_s(show, show2);
+	//yearangle显示，(扫描更新)yearangle
+	swprintf_s(show2, _T("\n\rYANGLE  %02d°%02d'%05.2f\"  DAYS  %.6lf/ %d")
+		, GetRadianDValue(environment.yearangle)
+		, GetRadianMValue(environment.yearangle)
+		, GetRadianSValue(environment.yearangle)
+		, environment.yearpassed, environment.ydays
+	);
+	wcscat_s(show, show2);
+	//赤道平面上，与直射点反面同一经线的点，相对地轴需转过的角度显示
+	swprintf_s(show2, _T("\n\rEQUATORANGLE  %02d°%02d'%05.2f\"")
+		, GetRadianDValue(environment.equatorangle)
+		, GetRadianMValue(environment.equatorangle)
+		, GetRadianSValue(environment.equatorangle)
+	);
+	wcscat_s(show, show2);
+	//赤纬
+	swprintf_s(show2, _T("\n\rDECLINATION  %02d°%02d'%05.2f\"  P:%02d°%02d'%05.2f\"")
+		, GetRadianDValue(environment.declination_general)
+		, GetRadianMValue(environment.declination_general)
+		, GetRadianSValue(environment.declination_general)
+		, GetRadianDValue(environment.declination_precise)
+		, GetRadianMValue(environment.declination_precise)
+		, GetRadianSValue(environment.declination_precise)
+	);
+	wcscat_s(show, show2);
+	//太阳位置显示，(扫描更新)
+	swprintf_s(show2, _T("\n\rSUN  H %02d°%02d'%02d\"  V %02d°%02d'%02d\"   %S")
+		, GetRadianDValue(environment.hangle)
+		, GetRadianMValue(environment.hangle)
+		, GetRadianSValueI(environment.hangle)
+		, GetRadianDValue(environment.vangle)
+		, GetRadianMValue(environment.vangle)
+		, GetRadianSValueI(environment.vangle)
+		, viewdirection[(int)((environment.hangle + MYPI / 8) / MYPI * 4)]
+	);
+	if (abs((int)((environment.hangle + MYPI / 8) / MYPI * 4)*MYPI / 4 - environment.hangle)
+		<= ANGLE_NEARRANGE / RADIAN2DEGREE)
+		wcscat_s(show2, L"+");//是否逼近一个方位TODO ERROR
+	wcscat_s(show, show2);
+	//光照指数显示，(扫描更新)
+	swprintf_s(show2, _T("\n\rLIGHT  A %.4f%%  D %.4f%%")
+		, environment.ambientindex * 100, environment.diffuseindex * 100);
+	wcscat_s(show, show2);
+	//法向量显示，(扫描更新)
+	/*swprintf_s(show2, _T("\n\rNOR %.3f, %.3f, %.3f  LI %.3f")
+		, environment.basenormal.x, environment.basenormal.y, environment.basenormal.z
+		, ambientindex);
+	wcscat_s(show, show2);*/
+	//法向量显示，(扫描更新)
+	swprintf_s(show2, _T("\n\rGNOR  %.4f, %.4f, %.4f  |%.6f|")
+		, environment.groundnormal.x, environment.groundnormal.y, environment.groundnormal.z
+		, D3DXVec3Length(&environment.groundnormal));
+	wcscat_s(show, show2);
+	//方向向量显示，(扫描更新)
+	swprintf_s(show2, _T("\n\rEWDIR  %.4f, %.4f, %.4f  |%.6f|  %3.3E")
+		, environment.grounddirectionEW.x, environment.grounddirectionEW.y, environment.grounddirectionEW.z
+		, D3DXVec3Length(&environment.grounddirectionEW)
+		, D3DXVec3Dot(&environment.grounddirectionEW, &environment.groundnormal)
+	);
+	wcscat_s(show, show2);
+	//PI显示
+	swprintf_s(show2, _T("\n\rπ  %.16lf (D3D)\n\rπ  %.16lf (MY)")
+		, D3DX_PI
+		, MYPI
+	);
+	wcscat_s(show, show2);
+	font->DrawTextW(NULL, show, -1, &text2, DT_LEFT | DT_NOCLIP, COLOR_WHITE);//多行联合显示
 
 	//行走状态、方向显示，扫描更新
 	//swprintf_s(show, _T("%lc   %d"), testchar, testchar); //测试显示效果
@@ -982,7 +1114,9 @@ void InfoShow()
 		swprintf_s(show, _T("%lc"), walkdirection[9]);
 	else
 		swprintf_s(show, _T("%lc"), walkdirection[viewer.curdirection]);
-	font2->DrawTextW(NULL, show, -1, &text6, DT_CENTER | DT_NOCLIP, COLOR_DIRECTION);
+	if(rotated)
+		wcscat_s(show, L">>");
+	font2->DrawTextW(NULL, show, -1, &text6, DT_LEFT | DT_NOCLIP, COLOR_DIRECTION);
 }
 
 void OtherInfoShow()
@@ -1006,27 +1140,119 @@ void OtherInfoShow()
 		}
 	}
 
-	//当前时间显示，(定时更新)
-	if ((loopcount & 0x3F) == 0)
+	WCHAR show2[256] = { 0 };
+	//冬至时区
+	if(environment.basetimezone>=0)
+		swprintf_s(show, _T("MIDWINTER(BASE) TIMEZONE (+%d)"), environment.basetimezone);
+	else
+		swprintf_s(show, _T("MIDWINTER(BASE) TIMEZONE (-%d)"), environment.basetimezone);
+	wcscat_s(show, show2);
+
+	//冬至时显示
+	swprintf_s(show2, _T("\r\nMIDWINTERS %d-%02d-%02d  %S   %02d:%02d:%02d\r\nMIDWINTERE %d-%02d-%02d  %S   %02d:%02d:%02d")
+		, environment.lastmidwinter.tm_year + 1900, environment.lastmidwinter.tm_mon + 1, environment.lastmidwinter.tm_mday
+		, GetWDayStr(environment.lastmidwinter.tm_wday).c_str()
+		, environment.lastmidwinter.tm_hour, environment.lastmidwinter.tm_min, environment.lastmidwinter.tm_sec
+		, environment.nextmidwinter.tm_year + 1900, environment.nextmidwinter.tm_mon + 1, environment.nextmidwinter.tm_mday
+		, GetWDayStr(environment.nextmidwinter.tm_wday).c_str()
+		, environment.nextmidwinter.tm_hour, environment.nextmidwinter.tm_min, environment.nextmidwinter.tm_sec);//时间字符串
+	wcscat_s(show, show2); 
+
+	//回归年时长显示
+	swprintf_s(show2, _T("\r\nTROPICAL YEAR LENGTH %lld sec")
+		, (environment.tyearend - environment.tyearstart));
+	wcscat_s(show, show2);
+
+	//当前时间秒数显示，(定时更新)
+	swprintf_s(show2, _T("\r\nSEC  %lld"), nowtime);
+	wcscat_s(show, show2);
+
+	//格林威治时间显示，(定时更新)
+	swprintf_s(show2, _T("\r\n(0) GMT %d-%02d-%02d  %S   %02d:%02d:%02d")
+		, dateGMT.tm_year + 1900, dateGMT.tm_mon + 1, dateGMT.tm_mday, GetWDayStr(dateGMT.tm_wday).c_str()
+		, dateGMT.tm_hour, dateGMT.tm_min, dateGMT.tm_sec
+		, devicedate.tm_year + 1900, devicedate.tm_mon + 1, devicedate.tm_mday, GetWDayStr(devicedate.tm_wday).c_str()
+		, devicedate.tm_hour, devicedate.tm_min, devicedate.tm_sec
+	);
+	wcscat_s(show, show2);
+
+	//设备时间
+	if (devicetimezone > 0)
 	{
-		time_t rawtime;
-		time(&rawtime);
-		localtime_s(&Time, &rawtime);//读取当前时间
+		swprintf_s(show2, _T("\r\n(+%d) DEVICE %d-%02d-%02d  %S   %02d:%02d:%02d")
+			, devicetimezone
+			, devicedate.tm_year + 1900, devicedate.tm_mon + 1, devicedate.tm_mday, GetWDayStr(devicedate.tm_wday).c_str()
+			, devicedate.tm_hour, devicedate.tm_min, devicedate.tm_sec
+		);
 	}
-	swprintf_s(show, _T("%d-%02d-%02d  %S   %02d:%02d:%02d")
-		, Time.tm_year + 1900, Time.tm_mon + 1, Time.tm_mday, GetWDayStr(Time.tm_wday).c_str()
-		, Time.tm_hour, Time.tm_min, Time.tm_sec);//时间字符串
-	font3->DrawTextW(NULL, show, -1, &text7, DT_RIGHT | DT_NOCLIP, COLOR_GREY2);
+	else
+	{
+		swprintf_s(show2, _T("\r\n(%d) DEVICE %d-%02d-%02d  %S   %02d:%02d:%02d")
+			, devicetimezone
+			, devicedate.tm_year + 1900, devicedate.tm_mon + 1, devicedate.tm_mday, GetWDayStr(devicedate.tm_wday).c_str()
+			, devicedate.tm_hour, devicedate.tm_min, devicedate.tm_sec
+		);
+	}
+	wcscat_s(show, show2);
+
+	//提供冬至时时区的时间
+	swprintf_s(show2, _T("\r\nBASE %d-%02d-%02d  %S   %02d:%02d:%02d")
+		, basedate.tm_year + 1900, basedate.tm_mon + 1, basedate.tm_mday, GetWDayStr(basedate.tm_wday).c_str()
+		, basedate.tm_hour, basedate.tm_min, basedate.tm_sec
+	);
+	wcscat_s(show, show2);
+
+	byte polarday = 0;
+
+	if (MYPI / 2 - viewer.latitude <= abs(environment.declination_precise))
+		polarday = 1;
+	else if(MYPI / 2 + viewer.latitude <= abs(environment.declination_precise))
+		polarday = 2;
+
+	wcscat_s(show, L"\r\n");
+	if (polarday == 1)
+		wcscat_s(show, L"POLAR DAY  ");
+	else if(polarday == 2)
+		wcscat_s(show, L"POLAR NIGHT  ");
+
+	//当前位置的准确时间
+	short timezone;
+	if (viewer.longitude >= 0)
+		timezone = (int)(viewer.longitude / TIMEZONERADIAN + 0.5);
+	else
+		timezone = (int)(viewer.longitude / TIMEZONERADIAN - 0.5);
+	if (timezone > 0)
+	{
+		swprintf_s(show2, _T("(+%d) REAL %d-%02d-%02d  %S   %02d:%02d:%02d")
+			, timezone
+			, realdate.tm_year + 1900, realdate.tm_mon + 1, realdate.tm_mday, GetWDayStr(realdate.tm_wday).c_str()
+			, realdate.tm_hour, realdate.tm_min, realdate.tm_sec
+		);//时间字符串
+	}
+	else
+	{
+		swprintf_s(show2, _T("(%d) REAL %d-%02d-%02d  %S   %02d:%02d:%02d")
+			, timezone
+			, realdate.tm_year + 1900, realdate.tm_mon + 1, realdate.tm_mday, GetWDayStr(realdate.tm_wday).c_str()
+			, realdate.tm_hour, realdate.tm_min, realdate.tm_sec
+		);//时间字符串
+	}
+	wcscat_s(show, show2);
+	font3->DrawTextW(NULL, show, -1, &text7, DT_RIGHT | DT_BOTTOM | DT_NOCLIP, COLOR_GREY2);
+
+	//特殊字符
+	swprintf_s(show, _T("%lc"), L'￼');
+	font2->DrawTextW(NULL, show, -1, &text11, DT_RIGHT | DT_NOCLIP, COLOR_GREY2);
 
 	//内存占用量显示，(定时更新)
-	if ((loopcount & 0xFF) == 0)
+	if (nowtime != lasttime)
 	{
 		HANDLE handle = GetCurrentProcess();
 		PROCESS_MEMORY_COUNTERS pmc;
 		GetProcessMemoryInfo(handle, &pmc, sizeof(pmc));
 
-		memory1 = pmc.WorkingSetSize / 1000000.;//内存占用量
-		memory2 = pmc.PagefileUsage / 1000000.;	//虚拟内存占用量
+		memory1 = pmc.WorkingSetSize / 1000000.0f;//内存占用量
+		memory2 = pmc.PagefileUsage / 1000000.0f;	//虚拟内存占用量
 	}
 	swprintf_s(show, _T("%.1fMB, %.1fMB"), memory1, memory2);
 	font->DrawTextW(NULL, show, -1, &text8, DT_RIGHT | DT_NOCLIP, COLOR_GREY2);
@@ -1043,7 +1269,7 @@ _D3DMULTISAMPLE_TYPE GetMultisampleType(LPDIRECT3D9 lp, D3DDISPLAYMODE dm)
 		return D3DMULTISAMPLE_NONE;
 
 	int multisample = 0;
-	while (multisample<=16)//循环测试，更新多重采样模式适用列表、最大多重采样，当前多重采样模式设为最大
+	while (multisample <= 16)//循环测试，更新多重采样模式适用列表、最大多重采样，当前多重采样模式设为最大
 	{
 		if (lp->CheckDeviceMultiSampleType(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL
 			, dm.Format, true, (_D3DMULTISAMPLE_TYPE)multisample, NULL) != D3D_OK)
@@ -1104,4 +1330,29 @@ void Get2WndRect()
 	clientcenter.y = (clientrect.top + clientrect.bottom) / 2;
 
 	GetWindowRect(mainwnd, &wndrect);//得到窗口区域
+}
+
+inline int GetRadianDValue(double radian)
+{
+	return (int)(radian*RADIAN2DEGREE);
+}
+
+inline int GetRadianMValue(double radian)
+{
+	double absd = abs(radian)*RADIAN2DEGREE;
+	return (int)floor((absd - (int)absd) * 60);
+}
+
+inline double GetRadianSValue(double radian)
+{
+	double absd = abs(radian)*RADIAN2DEGREE;
+	double fraction = absd - (int)absd;
+	return floor((((fraction * 60) - floor(fraction * 60)) * 60.) * 100) / 100;
+}
+
+inline int GetRadianSValueI(double radian)
+{
+	double absd = abs(radian)*RADIAN2DEGREE;
+	double fraction = absd - (int)absd;
+	return (int)(((fraction * 60) - (int)(fraction * 60)) * 60);
 }

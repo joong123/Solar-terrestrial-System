@@ -1,7 +1,7 @@
 #pragma once
 
 #include "resource.h"
-#include "windows.h"
+//#include "windows.h"
 #include "worldviewer.h"
 #include "worldblock.h"
 #include "environment.h"
@@ -10,35 +10,33 @@
 #include <d3dx9tex.h>
 #include <string>
 #include <tchar.h>
-#include <time.h>
 #include <psapi.h>
 #include <thread>
 
 using std::wstring;
 
 //颜色
-#define COLOR_CLEAR				D3DCOLOR_XRGB(0, 0, 0 )
-#define COLOR_BLUE1				D3DCOLOR_XRGB(100, 120, 255)
-#define COLOR_RED1				D3DCOLOR_XRGB(255, 120, 100)
-#define COLOR_RED2				D3DCOLOR_XRGB(255, 80, 80)
-#define COLOR_GREY1				D3DCOLOR_XRGB(240, 240, 240)
-#define COLOR_GREY2				D3DCOLOR_XRGB(230, 230, 230)
-#define COLOR_DIRECTION			D3DCOLOR_XRGB(230, 230, 230)
+#define COLOR_CLEAR					D3DCOLOR_XRGB(0, 0, 0 )
+#define COLOR_RED1					D3DCOLOR_XRGB(255, 120, 100)
+#define COLOR_RED2					D3DCOLOR_XRGB(255, 80, 80)
+#define COLOR_BLUE1					D3DCOLOR_XRGB(100, 120, 255)
+#define COLOR_GREY1					D3DCOLOR_XRGB(240, 240, 240)
+#define COLOR_GREY2					D3DCOLOR_XRGB(230, 230, 230)
+#define COLOR_DIRECTION				D3DCOLOR_XRGB(230, 230, 230)
 	
-
-//鼠标模式
-#define CONTROLMODE_NORMAL		1
-#define CONTROLMODE_CAPTURE		2
+//控制模式（是否接受鼠标键盘控制）
+#define CONTROLMODE_NORMAL			1
+#define CONTROLMODE_CAPTURE			2
 
 //运行模式
-#define MODE_STOP				0
-#define MODE_RUN				1
-#define MODE_MENU				2
-#define MODE_PAUSE				3
+#define MODE_STOP					0
+#define MODE_RUN					1
+#define MODE_MENU					2
+#define MODE_PAUSE					3
 
-#define STOPCAPTUREFREQ			40		// STOP模式下主循环频率(降低频率)
+#define STOPCAPTUREFREQ				40		// STOP模式下主循环频率(降低频率)
 
-#define INVALIDKEY_DELAY		0.4f	//非法字符显示持续时间（秒）
+#define INVALIDKEY_DELAY			0.4f	//非法字符显示持续时间（秒）
 
 struct threadparam {
 	bool *start;
@@ -57,7 +55,6 @@ DWORD WINAPI ThreadProc(LPVOID lpParam)//子线程，处理运动，视角移动
 	WViewer *pviewer = tpp->pviewer;
 	int *pcontrolmode = tpp->pcontrolmode;
 
-	WCHAR show[40];
 	while (true)
 	{
 		if (*start)
@@ -72,17 +69,26 @@ DWORD WINAPI ThreadProc(LPVOID lpParam)//子线程，处理运动，视角移动
 				bias.x -= pclientcenter->x;
 				bias.y -= pclientcenter->y;
 				pviewer->Rotate(bias);
-			}
-			//处理太阳（月亮、星星、云等环境）移动
+			}			
 			
-			
-			if (moved)//更新全局平移矩阵，调整environment位置，保持与眼镜相对位置不变
-			{
-				D3DXMatrixIdentity(&ViewTranslation);
-				D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, 0.0f);//z方向不平移
-			}
-			if (shadowchanged || moved)
-				matSun = ViewTranslation * sunTranslation;//更新太阳矩阵
+			//if (viewer.viewchanged)//更新全局平移矩阵，保持environment与眼睛相对位置不变
+			//{
+			//	//D3DXMatrixIdentity(&ViewTranslation); 
+			//	//D3DXMatrixTranslation(&ViewTranslation, viewpos.x, viewpos.y, 0.0f);//z方向不平移
+			//	D3DXMatrixIdentity(&inblockTranslation);
+			//	D3DXMatrixTranslation(&inblockTranslation
+			//		, inblockpos.x, inblockpos.y, 0.0f);//z方向不平移
+			//}
+			//if (shadowchanged || moved)
+			//	matSun = inblockTranslation * sunTranslation;//更新太阳矩阵，保持太阳与眼睛相对位置不变
+
+			//环境按n秒变化
+			//environment.ViewMove();//计算实时经纬度
+			//if (nowtime / 2 != lasttime / 2)
+			//{
+			//	localtime_s(&nowdate, &nowtime);//读取当前时间
+			//	environment.SunMove();
+			//}
 
 			*start = false;
 		}
@@ -112,12 +118,15 @@ int screenwidth, screenheight;			//屏幕长宽
 //运行信息
 time_t loopcount;						//循环计数
 POINT cursorpos;						//鼠标坐标
-float fps, avgfps, fpslimit;			//帧率, 帧率限制（<=0表示无限制）
-float frametime;						//帧时间
+float fps, avgfps, fpslimit;			//帧率, 帧率限制（fpslimit<=0表示无限制）
+float frametime, avgframetime;			//帧时间
 char invalidkey; LARGE_INTEGER invalidtime;//非法按键记录
 float memory1, memory2;					//内存占用量
-tm Time;								//时间
-//wchar_t testchar;						//测试屏幕显示效果的字符
+tm dateGMT, devicedate, basedate, lastdate, realdate;//时间。basedate是提供冬至日时区的时间
+time_t nowtime, basetime, lasttime, realtime;		//时间
+int devicetimezone;						//设备的时区
+wchar_t testchar;						//测试屏幕显示效果的字符
+bool rotated;							//视角是否旋转
 
 //计时
 LARGE_INTEGER frequency;				//计数器频率
@@ -147,7 +156,7 @@ bool depthbiasable;						//depthbias是否可用
 LPD3DXFONT font, font2, font3;			//字体
 RECT text, text2, text3, text4, text5, text6, text7;//文字信息显示区域
 RECT text8, text9, text10, text11, text12;
-WCHAR show[256], showms[100], status1[100], status2[100];//文字信息缓存
+WCHAR show[1024], showms[100], status1[100], status2[100];//文字信息缓存
 
 
 //观察者
@@ -160,47 +169,11 @@ Environment environment;
 //
 //信息共享
 //
-//眼睛位于哪个区块
-INDEX2D blockindex;
-//眼睛位置
-	//[在WViewer构造函数中初始化，Walk()、SetViewmode()、KeyControlDown()和SetViewVector()中实时更新
-	//	，子线程和SetViewmode()中更新ViewTranslation, SetView()中用来SetTransform(D3DTS_VIEW,)]
-D3DXVECTOR3 viewpos;
-//视角矩阵（全局平移矩阵），environment绘制所使用的水平平移矩阵
-	//[在子线程中根据moved用viewpos实时条件更新，子线程中根据moved和shadowchanged实时更新matSun
-	//	，在WViewer构造函数中用viewpos初始化，在environment的InitMaterialLight()中初始化matSun]
-D3DXMATRIX ViewTranslation;	
-//视角是否改变，条件更新view，不等于viewer的matTranslation。【不实时更新，渲染帧时更新】
-	//[在SetViewmode()、Walk()、Rotate()中设置为true，MainLoop()中用于条件SetView()的依据
-	//	并在所有元素绘制结束后设置为false，在InitInstance()中初始化]
-bool viewchanged;
-//视角是否移动，条件更新阴影矩阵，是viewchanged的子集
-	//[在子线程中用来条件更新ViewTranslation和matSun的依据，在WViewer的Draw()中用于条件更新matShadowWorld的依据
-	//	，在Walk()中设置为true，在MainLoop()中所有元素绘制结束后设置为false，在InitInstance()中初始化为true]
-bool moved;
-//太阳世界矩阵（= ViewTranslation * sunTranslation）
-	//[在子线程中根据shadowchanged || moved条件更新，在InitMaterialLight()中初始化为true
-	//	在InitInstance()中初始化为true]
-D3DXMATRIX matSun; 
-//太阳平移矩阵【不实时更新，渲染帧时更新】
-	//[在子线程中用于条件更新matSun，在InitMaterialLight()中用sunLight初始化并更新matSun]
-D3DXMATRIX sunTranslation;
-D3DXMATRIX sunRotate;			//太阳旋转矩阵，unused
-//太阳（月亮、星星、云等环境）位置是否改变，条件更新阴影矩阵
-	//[在子线程中用于条件更新matSun，在MainLoop()中所有元素绘制结束后设置为false
-	//，在InitMaterialLight()中初始化为true，在InitInstance()中初始化为true
-	//，在WViewer的Draw()中条件更新matShadowWorld，在WBlock的Draw()中条件更新matShadowWorld]
+bool anti;
 bool shadowchanged;
-//太阳位置
-	//[在InitMaterialLight()中根据light0初始化并初始化sunTranslation和matShadow]
-D3DXVECTOR4 sunLight;
-//阴影矩阵
-	//[在InitMaterialLight()中用sunLight和groundPlane初始化并用groundPlane.d垂直抬升，
-	//，在WBlock的Draw()中根据shadowchanged条件更新matShadowWorld
-//，在WViewer的Draw()中和shadowchanged条件更新matShadowWorld]
-D3DXMATRIX matShadow;
-//阴影材质
-D3DMATERIAL9 shadowmtrl;
+D3DXMATRIX matShadow;				//阴影矩阵
+D3DMATERIAL9 shadowmtrl;			//阴影材质
+bool sundown;						//太阳是否落山
 
 //主循环
 inline void MainLoop();			
@@ -222,11 +195,15 @@ void OnResetDevice();			//设备重置处理
 inline void FpsShow();			//显示fps
 inline void InfoShow();			//显示信息
 inline void OtherInfoShow();	//显示其他信息
-inline void UpdateStatusStr();	//更新状态字符串
+inline void UpdateStatusStr();	//更新状态,k字符串
 
 //时间
 inline string GetWDayStr(int wday);	//得到星期几字符串
 inline void Get2WndRect();			//获取实时窗口和客户区区域
+inline int GetRadianDValue(double radian);
+inline int GetRadianMValue(double radian);
+inline double GetRadianSValue(double radian);
+inline int GetRadianSValueI(double radian);
 
 //控制
 bool FullScreen(bool tofull);	//设置全屏模式

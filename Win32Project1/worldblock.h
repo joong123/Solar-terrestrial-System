@@ -14,6 +14,8 @@
 //颜色
 #define COLOR_GROUND			D3DCOLOR_XRGB(240, 240, 240)
 #define COLOR_GROUND2			D3DCOLOR_XRGB(80, 255, 30)
+#define COLOR_GROUND3			D3DCOLOR_XRGB(250, 255, 30)
+#define COLOR_GROUND4			D3DCOLOR_XRGB(140, 255, 30)
 #define COLOR_SIGN				D3DCOLOR_XRGB(160, 20, 20)
 
 using std::string;
@@ -28,8 +30,6 @@ public:
 
 	float blockradius;				//正方形区块边长
 	float blockrange;				//视野距离，unused
-
-	//D3DXVECTOR2 blockindex;		//全局变量代替
 
 	int blockmode;					//区块模式
 
@@ -51,7 +51,7 @@ public:
 
 	bool SetDevice(LPDIRECT3DDEVICE9 device);
 	bool SetGBlock();
-	inline bool Draw()
+	inline bool Render()
 	{
 		if (!device)
 			return false;
@@ -66,31 +66,47 @@ public:
 		generalmesh->DrawSubset(0);
 
 		//周边区块绘制
-		D3DXMatrixTranslation(&matWorld, 2*blockradius, 0.0f, 0.0f);
-		device->SetTransform(D3DTS_WORLD, &matWorld);
-		device->SetMaterial(&blockmtrl);//材质
-		generalmesh->DrawSubset(0);
-		device->SetMaterial(&signmtrl);//材质
-		signmesh->DrawSubset(0);
+		//D3DXMatrixTranslation(&matWorld, 2 * blockradius, 0.0f, 0.0f);
+		//device->SetTransform(D3DTS_WORLD, &matWorld);
+		//device->SetMaterial(&blockmtrl);//材质
+		//generalmesh->DrawSubset(0); 
+		//D3DXMatrixTranslation(&matWorld, -2 * blockradius, 0.0f, 0.0f);
+		//device->SetTransform(D3DTS_WORLD, &matWorld);
+		//device->SetMaterial(&blockmtrl);//材质
+		//generalmesh->DrawSubset(0);
+		//D3DXMatrixTranslation(&matWorld, 0.0f, 2 * blockradius, 0.0f);
+		//device->SetTransform(D3DTS_WORLD, &matWorld);
+		//device->SetMaterial(&blockmtrl);//材质
+		//generalmesh->DrawSubset(0);
+		//D3DXMatrixTranslation(&matWorld, 0.0f, -2 * blockradius, 0.0f);
+		//device->SetTransform(D3DTS_WORLD, &matWorld);
+		//device->SetMaterial(&blockmtrl);//材质
+		//generalmesh->DrawSubset(0);
+		//不画路标
+		//device->SetMaterial(&signmtrl);//材质
+		//signmesh->DrawSubset(0);
 
 
 		//sign阴影,只画人物所在区块的sign阴影
-		if (shadowchanged)
-		{
-			D3DXMatrixIdentity(&matWorld);
-			matShadowWorld = matWorld * matShadow;
-		}
-		device->SetTransform(D3DTS_WORLD, &matShadowWorld);
+		//if (!sundown)
+		//{
+		//	if (shadowchanged)
+		//	{
+		//		D3DXMatrixIdentity(&matWorld);
+		//		matShadowWorld = matWorld * matShadow;
+		//	}
+		//	device->SetTransform(D3DTS_WORLD, &matShadowWorld);
 
-		ShadowBegin();
-		signmesh->DrawSubset(0);
-		ShadowEnd();
+		//	ShadowBegin();
+		//	signmesh->DrawSubset(0);
+		//	ShadowEnd();
+		//}
 
-		//sign绘制，覆盖阴影
-		D3DXMatrixIdentity(&matWorld);
-		device->SetTransform(D3DTS_WORLD, &matWorld);
-		device->SetMaterial(&signmtrl);//材质
-		signmesh->DrawSubset(0);
+		////sign绘制，覆盖阴影
+		//D3DXMatrixIdentity(&matWorld);
+		//device->SetTransform(D3DTS_WORLD, &matWorld);
+		//device->SetMaterial(&signmtrl);//材质
+		//signmesh->DrawSubset(0);
 
 
 		//buffer 绘制

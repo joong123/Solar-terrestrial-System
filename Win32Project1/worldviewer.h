@@ -5,6 +5,7 @@
 #include <d3dx9tex.h>
 #include <string>
 
+//颜色
 #define COLOR_FIGURE1					D3DCOLOR_XRGB(255, 140, 120)
 //view模式
 #define VIEWMODE_FIRSTPERSON			1
@@ -35,18 +36,12 @@ using std::string;
 //运动
 const WCHAR walkdirection[10] = { L'○', L'↑', L'←', L'→', L'↓', L'↖', L'↗', L'↙', L'↘', L'﹡' };
 const char viewdirection[][3] = { "E", "NE", "N", "NW", "W", "SW", "S", "SE", "E"};//视角方向
-const float division = 0.04f;				//最小位移分度值
 const float speednormal = WALKSPEED;		//正常速度
 const float speeddelaytime = 0.04f;			//速度维持不变的时间。残余速度时间1
 const float speedsmoothtime = 0.1f;			//速度降为0需要的时间。残余速度时间2
-const float chasedist = 1.2f;				//追捕视角水平距离
-const float chasescreenheight = 0.4f;		//追捕视角高度
+const float chasedist = 0.6f;				//追捕视角水平距离
+const float chasescreenheight = 0.2f;		//追捕视角高度
 const float overlookscreenheight = 300.0f;	//俯视高度
-
-//共享变量
-//extern D3DXVECTOR4 sunPos;
-//extern D3DXMATRIX matShadow;
-//extern D3DMATERIAL9 shadowmtrl;
 
 class WViewer {
 public:
@@ -65,17 +60,27 @@ public:
 	D3DXMATRIXA16 matShadowWorld;		//影子矩阵
 
 	//材质 & 纹理
-	D3DMATERIAL9 figuremtrl;
-	LPDIRECT3DTEXTURE9 g_Texture;
+	D3DMATERIAL9 figuremtrl;			//人物材质
+	LPDIRECT3DTEXTURE9 g_Texture;		//地面光照纹理
 
 	//实时信息
-	D3DXVECTOR3 pos;					//人物位置
-	float figurehangle, figurevangle;	//人物朝向
-	//D3DXVECTOR3 viewpos;				//眼睛真实位置，转为全局变量
-	float hAngle;						//视角水平面角度	(0~360) x正向=0
-	float vAngle;						//视角纵向角度	(-90~90)
-	D3DXVECTOR3 displacement;			//位移
-	D3DXVECTOR3 viewdirection;			//眼睛方向, added
+	DoubleVec3 viewpos_d;
+	DoubleVec3 displacement;			//位移
+	double baselongitude, baselatitude;
+	double longitude, latitude;			//眼睛经纬度TODO:旋转时修改
+	double figurelongitude, figurelatitude;
+	DoubleVec3 pos_d;					//double类型人物位置
+	INDEX2D blockindex;					//眼睛位于哪个区块
+	D3DXVECTOR3 inblockpos;
+	D3DXMATRIX inblockTranslation;
+
+	float figurehangle, figurevangle;	//人物朝向(0~360) & (-90~90)
+	double hAngle;						//视角水平面角度	(0~360) x正向=0
+	double basehangle;
+	double earthhangle;					//在地球上当前位置，实际的指向
+	double vAngle;						//视角纵向角度	(-90~90)
+	D3DXVECTOR3 viewdirection;			//眼睛方向, 用于辅助计算at：eye + viewdirection = at
+	D3DXVECTOR3 eye;
 	D3DXVECTOR3 at;						//视线目标
 	D3DXVECTOR3 up;
 	float viewangle;					//视野角度
@@ -86,6 +91,7 @@ public:
 	LARGE_INTEGER endtick;				//结束方向键时的ticks，用于残余速度计算
 	LARGE_INTEGER lasttick;				//上一个tick，用于当前行走距离计算
 	float speed;						//当前速度
+	float speedrate;
 	int remnantspeedmode;				//残余速度模式
 	int curdirection;					//当前运动方向
 	int lastdirection;					//当前方向为0时存储上一个方向，处理残余速度的运动
@@ -95,62 +101,116 @@ public:
 	D3DXVECTOR3 figureeye;				//视角位置(人物眼睛相对人物模型位置)
 	float viewradius;					//视野距离
 	float sensitivity;					//旋转灵敏度
-	float hcos, hsin, vsin, vcos;		//加速运算
+	double hcos, hsin, vsin, vcos, bhcos, bhsin;		//加速运算
 	bool flashlight;
 
 	int viewmode;						//view模式
+	bool viewchanged;
+	bool figuremoved;
+	bool eyehmoved;
+	bool bindview;
 
 public:
 	WViewer();
 	~WViewer();
 
-	void InitProj(float angle, float aspect);	//设置投影变换参数并设置变换
+	void InitProj(float aspect);	//设置投影变换参数并设置变换
 	void SetFigure();
 
 	bool SetDevice(LPDIRECT3DDEVICE9 device);	//传递设备
 	bool SetViewAngle(float angle);				//设置view角度
 	bool SetAspect(float aspect);				//设置aspect
-	bool SetViewmode(int mode);					//设置观察模式
-	inline void SetViewVector()					//根据当前人物位置pos和观察模式，更新视线参数
+	void SetViewmode(int mode);					//设置观察模式
+	inline void Refreshtri()
+	{
+		hcos = cos(hAngle);
+		hsin = sin(hAngle);
+		vsin = sin(vAngle);
+		vcos = cos(vAngle);
+	}
+	inline void BindView()
 	{
 		switch (viewmode)
 		{
 		case VIEWMODE_FIRSTPERSON:
-			viewpos = pos + D3DXVECTOR3(cos(figurehangle)*figureeye.x -sin(figurehangle)*figureeye.y
-				, sin(figurehangle)*figureeye.x + cos(figurehangle)*figureeye.y, figureeye.z);
-			at = viewpos + viewdirection;//z轴负向为世界天空方向，z值取负
+			viewpos_d = pos_d + DoubleVec3(hcos*figureeye.x -hsin*figureeye.y
+				, hsin*figureeye.x + hcos*figureeye.y, figureeye.z);
 			break;
 		case VIEWMODE_CHASE:
-			viewpos = pos + D3DXVECTOR3(-chasedist*hcos, -chasedist*hsin, -chasescreenheight);
-			at = viewpos + viewdirection;
+			viewpos_d = pos_d + DoubleVec3(-chasedist*hcos, -chasedist*hsin, -chasescreenheight);
 			break;
 		case VIEWMODE_FREE:
-			//viewpos = pos + D3DXVECTOR3(-chasedist*hcos, -chasedist*hsin, -chasescreenheight);
-			at = viewpos + viewdirection;
+			//viewpos_d = pos_d + DoubleVec3(-chasedist*hcos, -chasedist*hsin, -chasescreenheight);
 			break;
 		case VIEWMODE_OVERLOOK:
-			//viewpos = pos + D3DXVECTOR3(0.0f, 0.0f, -overlookscreenheight);
-			at = viewpos + viewdirection;//自由视角
-			//at = pos;//限制垂直视角
+			//viewpos_d = pos_d + DoubleVec3(0.0f, 0.0f, -overlookscreenheight);
+			//at = inblockpos;//限制垂直视角
 			break;
 		}
+
+		bindview = false;
+	}
+	inline void SetBlockInfo()
+	{
+		//更新区块位置
+		blockindex.x = (long long)floor((viewpos_d.x + BLOCKRADIUS) / (long long)(2 * BLOCKRADIUS));
+		blockindex.y = (long long)floor((viewpos_d.y + BLOCKRADIUS) / (long long)(2 * BLOCKRADIUS));
+		//更新inblockpos，实际眼睛位置
+		inblockpos = D3DXVECTOR3(
+			(float)(viewpos_d.x - blockindex.x * 2 * BLOCKRADIUS)
+			, (float)(viewpos_d.y - blockindex.y * 2 * BLOCKRADIUS)
+			, 0.0f);
+		//更新平移矩阵
+		D3DXMatrixIdentity(&inblockTranslation);
+		D3DXMatrixTranslation(&inblockTranslation, inblockpos.x, inblockpos.y, 0.0f);//z方向不平移
+
+		//eyehmoved = false;
+	}
+	inline void SetViewVector()					//根据当前人物位置pos_d和观察模式，更新视线参数
+	{
+		//eye = D3DXVECTOR3(inblockpos.x, inblockpos.y, viewpos_d.z);
+		if(viewmode==VIEWMODE_CHASE)//经纬坐标策略，不使用区块
+			eye = D3DXVECTOR3(-chasedist*hcos, -chasedist*hsin, -chasescreenheight);
+		else if(viewmode==VIEWMODE_FIRSTPERSON)
+			eye = D3DXVECTOR3(hcos*figureeye.x - hsin*figureeye.y, hsin*figureeye.x + hcos*figureeye.y, figureeye.z);
+		else if(viewmode==VIEWMODE_FREE ||viewmode==VIEWMODE_OVERLOOK)
+			eye = D3DXVECTOR3(0.0f, 0.0f, viewpos_d.z);
+
 		//更新up
-		if (vAngle == -D3DX_PI / 2)
-			up = D3DXVECTOR3(hcos, hsin, 0.0f);
-		else if (vAngle == D3DX_PI / 2)
-			up = -D3DXVECTOR3(hcos, hsin, 0.0f);
+		if (vAngle == -MYPI / 2)
+			up = D3DXVECTOR3((float)(hcos), (float)(hsin), 0.0f);
+		else if (vAngle == MYPI / 2)
+			up = -D3DXVECTOR3((float)(hcos), (float)(hsin), 0.0f);
 		else
 			up = D3DXVECTOR3(0.0f, 0.0f, -1.0f);
+
+		viewdirection = D3DXVECTOR3((float)(hcos*vcos), (float)(hsin*vcos), (float)(-vsin));
+		//更新at
+		at = eye + viewdirection;//自由视角
 	}
-	inline bool SetView()				//根据实现参数进行视角变换
+	inline bool SetView()//更新视角矩阵
 	{
 		if (!device)
 			return false;
 
-		D3DXMatrixLookAtLH(&matView, &viewpos, &at, &up);
+		/*if (viewchanged)
+		{
+			SetViewVector();
+			D3DXMatrixLookAtLH(&matView, &eye, &at, &up);
+			viewchanged = false;
+		}*/
+
 		device->SetTransform(D3DTS_VIEW, &matView);
 
-		//viewchanged = false;
+		return true;
+	}
+	inline bool RefreshView()
+	{
+		SetViewVector();
+		D3DXMatrixLookAtLH(&matView, &eye, &at, &up);
+
+		viewchanged = false;
+
 		return true;
 	}
 	bool SetProj();								//根据当前参数设置投影变换
@@ -162,7 +222,7 @@ public:
 
 		LARGE_INTEGER now;
 		QueryPerformanceCounter(&now);
-		float time = (float)(now.QuadPart - endtick.QuadPart) / (float)frequency.QuadPart;
+		float time = (float)(now.QuadPart - endtick.QuadPart) / frequency.QuadPart;
 		if (curdirection == DIRECTION_NONE)//如果不在行走，才处理速度，行走期间保持速度恒定
 		{
 			switch (remnantspeedmode)
@@ -208,198 +268,338 @@ public:
 	inline void Walk()							//根据speed和curdirection进行行走
 	{
 		if (speed == 0.0f)//没速度则返回
+		{
+			displacement = DoubleVec3(0.0, 0.0, 0.0f);
 			return;
+		}
 
 		LARGE_INTEGER now;
 		QueryPerformanceCounter(&now);
-		float dist = speed*(double)(now.QuadPart - lasttick.QuadPart) / (double)frequency.QuadPart;//移动距离
+		double dist = speed*(double)(now.QuadPart - lasttick.QuadPart) / frequency.QuadPart;//移动距离
 		lasttick = now;//记录为上一次行走时间点
-		if (shiftdown)
-			dist *= 20;
+		dist *= speedrate;
 		//如果当前运动方向为NONE，使用存储的上一个运动方向
 		int direction = (curdirection == DIRECTION_NONE) ? lastdirection : curdirection;
 		if (viewmode == VIEWMODE_FIRSTPERSON || viewmode == VIEWMODE_CHASE)
 		{
 			if (direction == DIRECTION_TOP)//前进
 			{
-				pos += D3DXVECTOR3(dist*hcos, dist*hsin, 0.0f);
-				displacement = D3DXVECTOR3(dist*hcos, dist*hsin, 0.0f);
+				displacement.x = dist*hcos;
+				displacement.y = dist*hsin;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_DOWN)
 			{
-				pos += D3DXVECTOR3(-dist*hcos, -dist*hsin, 0.0f);
-				displacement = D3DXVECTOR3(-dist*hcos, -dist*hsin, 0.0f);
+				displacement.x = -dist*hcos;
+				displacement.y = -dist*hsin;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_LEFT)
 			{
-				pos += D3DXVECTOR3(-dist*hsin, dist*hcos, 0.0f);
-				displacement = D3DXVECTOR3(-dist*hsin, dist*hcos, 0.0f);
+				displacement.x = -dist*hsin;
+				displacement.y = dist*hcos;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_RIGHT)
 			{
-				pos += D3DXVECTOR3(dist*hsin, -dist*hcos, 0.0f);
-				displacement = D3DXVECTOR3(dist*hsin, -dist*hcos, 0.0f);
+				displacement.x = dist*hsin;
+				displacement.y = -dist*hcos;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_TOPLEFT)
 			{
-				pos += D3DXVECTOR3(dist*cos(hAngle + D3DX_PI / 8), dist*sin(hAngle + D3DX_PI / 8), 0.0f);
-				displacement = D3DXVECTOR3(dist*cos(hAngle + D3DX_PI / 8), dist*sin(hAngle + D3DX_PI / 8), 0.0f);
+				double biash = hAngle + MYPI / 8;
+				displacement.x = dist*cos(biash);
+				displacement.y = dist*sin(biash);
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_TOPRIGHT)
 			{
-				pos += D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8), dist*sin(hAngle - D3DX_PI / 8), 0.0f); 
-				displacement = D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8), dist*sin(hAngle - D3DX_PI / 8), 0.0f);
+				double biash = hAngle - MYPI / 8;
+				displacement.x = dist*cos(biash);
+				displacement.y = dist*sin(biash);
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_BOTTOMLEFT)
 			{
-				pos += D3DXVECTOR3(-dist*cos(hAngle - D3DX_PI / 8), -dist*sin(hAngle - D3DX_PI / 8), 0.0f);
-				displacement = D3DXVECTOR3(-dist*cos(hAngle - D3DX_PI / 8), -dist*sin(hAngle - D3DX_PI / 8), 0.0f);
+				double biash = hAngle - MYPI / 8;
+				displacement.x = -dist*cos(biash);
+				displacement.y = -dist*sin(biash);
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_BOTTOMRIGHT)
 			{
-				pos += D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8), -dist*sin(hAngle + D3DX_PI / 8), 0.0f);
-				displacement = D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8), -dist*sin(hAngle + D3DX_PI / 8), 0.0f);
+				double biash = hAngle + MYPI / 8;
+				displacement.x = -dist*cos(biash);
+				displacement.y = -dist*sin(biash);
+				displacement.z = 0.0;
 			}
-			//更新平移矩阵
-			D3DXMatrixIdentity(&matTranslation);
-			D3DXMatrixTranslation(&matTranslation, pos.x, pos.y, pos.z);
-			//更新平移偏转矩阵
-			D3DXMatrixIdentity(&matTranslation2);
-			D3DXMatrixTranslation(&matTranslation2, pos.x + TINYBIAS, pos.y, 0);
-			//更新世界矩阵
-			D3DXMatrixIdentity(&matWorld);
-			D3DXMatrixMultiply(&matWorld, &matTranslation, &matWorld);
-			D3DXMatrixMultiply(&matWorld, &matHRotate, &matWorld);
+			pos_d.x += displacement.x;
+			pos_d.y += displacement.y;
+			pos_d.z += displacement.z;
 		}
 		else if (viewmode == VIEWMODE_OVERLOOK)
 		{
-			float accerate = 20.0f;
 			if (direction == DIRECTION_TOP)//前进
 			{
-				viewpos += accerate*D3DXVECTOR3(dist*hcos, dist*hsin, 0.0f);
+				displacement.x = dist*hcos;
+				displacement.y = dist*hsin;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_DOWN)
 			{
-				viewpos -= accerate*D3DXVECTOR3(dist*hcos, dist*hsin, 0.0f);
+				displacement.x = -dist*hcos;
+				displacement.y = -dist*hsin;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_LEFT)
 			{
-				viewpos += accerate*D3DXVECTOR3(-dist*hsin, dist*hcos, 0.0f);
+				displacement.x = -dist*hcos;
+				displacement.y = dist*hsin;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_RIGHT)
 			{
-				viewpos += accerate*D3DXVECTOR3(dist*hsin, -dist*hcos, 0.0f);
+				displacement.x = dist*hcos;
+				displacement.y = -dist*hsin;
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_TOPLEFT)
 			{
-				viewpos += accerate*D3DXVECTOR3(dist*cos(hAngle + D3DX_PI / 8), dist*sin(hAngle + D3DX_PI / 8), 0.0f);
+				double biash = hAngle + MYPI / 8;
+				displacement.x = dist*cos(biash);
+				displacement.y = dist*sin(biash);
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_TOPRIGHT)
 			{
-				viewpos += accerate*D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8), dist*sin(hAngle - D3DX_PI / 8), 0.0f);
+				double biash = hAngle - MYPI / 8;
+				displacement.x = dist*cos(biash);
+				displacement.y = dist*sin(biash);
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_BOTTOMLEFT)
 			{
-				viewpos += accerate*D3DXVECTOR3(-dist*cos(hAngle - D3DX_PI / 8), -dist*sin(hAngle - D3DX_PI / 8), 0.0f);
+				double biash = hAngle - MYPI / 8;
+				displacement.x = -dist*cos(biash);
+				displacement.y = -dist*sin(biash);
+				displacement.z = 0.0;
 			}
 			else if (direction == DIRECTION_BOTTOMRIGHT)
 			{
-				viewpos += accerate*D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8), -dist*sin(hAngle + D3DX_PI / 8), 0.0f);
+				double biash = hAngle + MYPI / 8;
+				displacement.x = -dist*cos(biash);
+				displacement.y = -dist*sin(biash);
+				displacement.z = 0.0;
 			}
-			displacement = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+			viewpos_d.x += displacement.x;
+			viewpos_d.y += displacement.y;
+			viewpos_d.z += displacement.z;
 		}
 		else if (viewmode == VIEWMODE_FREE)
 		{
 			if (direction == DIRECTION_TOP)//前进
 			{
-				viewpos += D3DXVECTOR3(dist*hcos*vcos, dist*hsin*vcos, -dist*vsin);
+				displacement.x = dist*hcos*vcos;
+				displacement.y = dist*hsin*vcos;
+				displacement.z = -dist*vsin;
 			}
 			else if (direction == DIRECTION_DOWN)
 			{
-				viewpos -= D3DXVECTOR3(dist*hcos*vcos, dist*hsin*vcos, -dist*vsin);
+				displacement.x = -dist*hcos*vcos;
+				displacement.y = -dist*hsin*vcos;
+				displacement.z = dist*vsin;
 			}
 			else if (direction == DIRECTION_LEFT)
 			{
-				viewpos += D3DXVECTOR3(-dist*hsin, dist*hcos, 0.0f);
+				displacement.x = -dist*hsin;
+				displacement.y = dist*hcos;
+				displacement.z = 0.0f;
 			}
 			else if (direction == DIRECTION_RIGHT)
 			{
-				viewpos += D3DXVECTOR3(dist*hsin, -dist*hcos, 0.0f);
+				displacement.x = dist*hsin;
+				displacement.y = -dist*hcos;
+				displacement.z = 0.0f;
 			}
 			else if (direction == DIRECTION_TOPLEFT)
 			{
-				viewpos += D3DXVECTOR3(dist*cos(hAngle + D3DX_PI / 8)*vcos, dist*sin(hAngle + D3DX_PI / 8)*vcos, -dist*vsin / 2);
+				double biash = hAngle + MYPI / 8;
+				displacement.x = dist*cos(biash)*vcos;
+				displacement.y = dist*sin(biash)*vcos;
+				displacement.z = -dist*vsin / 2;
 			}
 			else if (direction == DIRECTION_TOPRIGHT)
 			{
-				viewpos += D3DXVECTOR3(dist*cos(hAngle - D3DX_PI / 8)*vcos, dist*sin(hAngle - D3DX_PI / 8)*vcos, -dist*vsin / 2);
+				double biash = hAngle - MYPI / 8;
+				displacement.x = dist*cos(biash)*vcos;
+				displacement.y = dist*sin(biash)*vcos;
+				displacement.z = -dist*vsin / 2;
 			}
 			else if (direction == DIRECTION_BOTTOMLEFT)
 			{
-				viewpos += D3DXVECTOR3(-dist*cos(hAngle - D3DX_PI / 8)*vcos, -dist*sin(hAngle - D3DX_PI / 8)*vcos, -dist*vsin / 2);
+				double biash = hAngle - MYPI / 8;
+				displacement.x = -dist*cos(biash)*vcos;
+				displacement.y = -dist*sin(biash)*vcos;
+				displacement.z = dist*vsin / 2;
 			}
 			else if (direction == DIRECTION_BOTTOMRIGHT)
 			{
-				viewpos += D3DXVECTOR3(-dist*cos(hAngle + D3DX_PI / 8)*vcos, -dist*sin(hAngle + D3DX_PI / 8)*vcos, -dist*vsin / 2);
+				double biash = hAngle + MYPI / 8;
+				displacement.x = -dist*cos(biash)*vcos;
+				displacement.y = -dist*sin(biash)*vcos;
+				displacement.z = dist*vsin / 2;
 			}
-			displacement = D3DXVECTOR3(0.0f, 0.0f, 0.0f);
+			viewpos_d.x += displacement.x;
+			viewpos_d.y += displacement.y;
+			viewpos_d.z += displacement.z;
 		}
-		//更新区块位置
-		blockindex.x = floor((viewpos.x + 200) / 400);
-		blockindex.y = floor((viewpos.y + 200) / 400);
 
-		SetViewVector();
-
-		viewchanged = true;//设置视角更新标志
-		moved = true;//设置视角移动标志
-		//SetView();// WHETHER NEEDED
+		if (viewmode == VIEWMODE_FIRSTPERSON || viewmode == VIEWMODE_CHASE)
+		{
+			//moved = true; //经纬坐标策略，不设置
+			bindview = true;
+		}
+		else
+			figuremoved = true;
+		eyehmoved = true;
+		viewchanged = true;
 	}
 	inline void HandleMove()					//处理当前移动
 	{
 		HandleSpeed();
 		Walk();
 	}
-	inline void Rotate(POINT bias)				//处理当前旋转
+	inline bool Rotate(POINT bias)				//处理当前旋转
 	{
-		hAngle += -bias.x * sensitivity;
+		if (bias.x == 0 && bias.y == 0)
+		{
+			return false;
+		}
+		double oldh = hAngle, oldv = vAngle;
+		double hbias = -bias.x * sensitivity;
+		hAngle += hbias;
 		if (hAngle < 0)
-			hAngle += 2 * D3DX_PI;
-		if (hAngle >= 2 * D3DX_PI)
-			hAngle -= 2 * D3DX_PI;
+			hAngle += 2 * MYPI;
+		if (hAngle >= 2 * MYPI)
+			hAngle -= 2 * MYPI;
 
 		vAngle -= bias.y * sensitivity;
-		if (vAngle < -D3DX_PI / 2)
-			vAngle = -D3DX_PI / 2;
-		if (vAngle > D3DX_PI / 2)
-			vAngle = D3DX_PI / 2;
+		if (vAngle < -MYPI / 2)
+			vAngle = -MYPI / 2;
+		if (vAngle > MYPI / 2)
+			vAngle = MYPI / 2;
+
+		Refreshtri();
 
 		if (viewmode == VIEWMODE_CHASE || viewmode == VIEWMODE_FIRSTPERSON)
 		{
 			//同步人物角度
-			figurehangle = hAngle;
-			figurevangle = vAngle;
+			figurehangle += -bias.x * sensitivity;
+			figurevangle += -bias.y * sensitivity;
+			if (figurehangle < 0)
+				figurehangle += (float)(2 * MYPI);
+			if (figurehangle >= (float)(2 * MYPI))
+				figurehangle -= (float)(2 * MYPI);
+			
+			if (figurevangle < -(float)(MYPI / 2))
+				figurevangle = -(float)(MYPI / 2);
+			if (figurevangle >(float)(MYPI / 2))
+				figurevangle = (float)(MYPI / 2);
 
-			//更新水平旋转矩阵
-			D3DXMatrixIdentity(&matHRotate);
-			D3DXMatrixRotationZ(&matHRotate, figurehangle);
-			//更新世界矩阵
-			D3DXMatrixIdentity(&matWorld);
-			D3DXMatrixMultiply(&matWorld, &matTranslation, &matWorld);
-			D3DXMatrixMultiply(&matWorld, &matHRotate, &matWorld);
+			double radius;
+			if (viewmode == VIEWMODE_CHASE)
+				radius = chasedist;
+			else
+				radius = sqrt(figureeye.x*figureeye.x + figureeye.y*figureeye.y);
 
-			//更新区块位置
-			blockindex.x = floor((viewpos.x + 200) / 400);
-			blockindex.y = floor((viewpos.y + 200) / 400);
+			/*displacement = DoubleVec3(
+				radius*(cos(hAngle)-cos(oldh))
+				, radius*(sin(vAngle) - cos(oldv))*cos(oldh)
+				, 0.0f);*/
 		}
-		hcos = cos(hAngle);
-		hsin = sin(hAngle);
-		vsin = sin(vAngle);
-		vcos = cos(vAngle);
-		viewdirection = D3DXVECTOR3(hcos*vcos, hsin*vcos, -vsin);
+		else
+		{
+			;//眼睛位置没改变，不更新人物矩阵，不更新区块位置
+		}
 
-		SetViewVector();
+		
+		if (viewmode == VIEWMODE_CHASE || viewmode == VIEWMODE_FIRSTPERSON)
+		{
+			eyehmoved = true;
+			bindview = true;
+			figuremoved = true;
+		}
 		viewchanged = true;//设置视角更新参数
-		//SetView();// WHETHER NEEDED
+
+		return true;
+	}
+	inline void ViewMove()//根据viewpos和基准经纬度计算实时经纬度，在SunMove()前调用
+	{
+		//过极点时如果3D世界视角也偏转，取消注释
+		//if (anti)
+		//	displacement = -displacement;
+
+
+		//经纬度
+		if (cos(latitude) == 0)
+			latitude = latitude
+			+ sqrt(displacement.x*displacement.x + displacement.y*displacement.y) / ONEMETER / AVGRADIUS;
+		else
+		{
+			latitude = latitude + displacement.y / ONEMETER / AVGRADIUS;
+			longitude = longitude + displacement.x / ONEMETER / AVGRADIUS / cos(latitude);
+		}
+		
+
+		double unnormalizedlatitude = latitude;
+
+		//规范化经纬度
+		NormalizeLongitudeLatitude(longitude, latitude);
+
+		//更新地球角度
+		if (latitude == MYPI / 2)
+			earthhangle = 3 * MYPI / 2;
+		else if (latitude == -MYPI / 2)
+			earthhangle = MYPI / 2;
+		else
+			earthhangle = hAngle;
+
+		if (unnormalizedlatitude > MYPI / 2 || unnormalizedlatitude < -MYPI / 2)
+		{
+			//经度转向
+			if (longitude > 0)
+				longitude -= MYPI;
+			else
+				longitude += MYPI;
+
+			anti = !anti;
+
+
+			if (hAngle < MYPI)
+				earthhangle = hAngle + MYPI;
+			else
+				earthhangle = hAngle - MYPI;
+
+			//过极点时，3D世界视角也偏转
+			hAngle = earthhangle;
+			Refreshtri();
+			bindview = true;
+		}
+
+
+		//if (anti)//越过（南北）极点，角度翻转
+		//{
+		//	if (hAngle < MYPI)
+		//		earthhangle = hAngle + MYPI;
+		//	else
+		//		earthhangle = hAngle - MYPI; 
+		//	
+		//	//viewchanged = true;
+		//	//hAngle = earthhangle;//TODO:3D世界视角角度是否也翻转
+		//}
+		//else
+		//	earthhangle = hAngle;
 	}
 	void DirectionControl();					//根据实时按键状态更新curdirection,并设置speed的启动
 	bool KeyControlDown(int key);				//按下按键的处理
@@ -407,7 +607,59 @@ public:
 	void Inactivate();							//窗口失去焦点后的处理
 	string GetViewmodeStr();					//获得当前view模式的字符串
 	int ChangeViewmode();						//切换view模式
-	inline void Draw()
+	inline void SetFigureMat()
+	{
+		//更新平移矩阵
+		D3DXMatrixIdentity(&matTranslation); 
+		//D3DXMatrixTranslation(&matTranslation
+		//	, (float)(pos_d.x - blockindex.x * 2 * BLOCKRADIUS)
+		//	, (float)(pos_d.y - blockindex.y * 2 * BLOCKRADIUS)
+		//	, 0.0f);//垂直方向不限制，TODO垂直方向traslation采用double
+		//			//更新平移偏转矩阵
+		//D3DXMatrixIdentity(&matTranslation2);
+		//D3DXMatrixTranslation(&matTranslation2
+		//	, (float)(pos_d.x - blockindex.x * 2 * BLOCKRADIUS) + TINYBIAS
+		//	, (float)(pos_d.y - blockindex.y * 2 * BLOCKRADIUS)
+		//	, 0);
+		if (viewmode == VIEWMODE_CHASE|| viewmode == VIEWMODE_FIRSTPERSON)
+		{
+			D3DXMatrixTranslation(&matTranslation
+				, 0.0f
+				, 0.0f
+				, 0.0f);//垂直方向不限制，TODO垂直方向traslation采用double
+						//更新平移偏转矩阵
+			D3DXMatrixIdentity(&matTranslation2);
+			D3DXMatrixTranslation(&matTranslation2
+				, 0.0f + TINYBIAS
+				, 0.0f
+				, 0);
+		}
+		else if (viewmode == VIEWMODE_FREE || viewmode == VIEWMODE_OVERLOOK)
+		{
+			D3DXMatrixTranslation(&matTranslation
+				, (float)(pos_d.x - viewpos_d.x)
+				, (float)(pos_d.y - viewpos_d.y)
+				, 0.0f);//垂直方向不限制，TODO垂直方向traslation采用double
+						//更新平移偏转矩阵
+			D3DXMatrixIdentity(&matTranslation2);
+			D3DXMatrixTranslation(&matTranslation2
+				, (float)(pos_d.x - viewpos_d.x) + TINYBIAS
+				, (float)(pos_d.y - viewpos_d.y)
+				, 0);
+		}
+		//更新水平旋转矩阵
+		D3DXMatrixIdentity(&matHRotate);
+		D3DXMatrixRotationZ(&matHRotate, figurehangle);
+		//更新世界矩阵
+		D3DXMatrixIdentity(&matWorld);
+		D3DXMatrixMultiply(&matWorld, &matTranslation, &matWorld);
+		D3DXMatrixMultiply(&matWorld, &matHRotate, &matWorld);
+		//更新阴影矩阵
+		matShadowWorld = matShadow*matTranslation;
+
+		figuremoved = false;
+	}
+	inline void Render()
 	{
 		if (!device)
 			return;
@@ -415,24 +667,28 @@ public:
 		if (!figure)
 			return;
 
+		if (figuremoved)
+			SetFigureMat();
+		//
+		//shadow 绘制
+		//
+		if (!sundown)
+		{
+			if (shadowchanged)
+				matShadowWorld = matShadow*matTranslation;//TODO可能算了两遍
+			device->SetTransform(D3DTS_WORLD, &matShadowWorld);
+
+			ShadowBegin();
+			figure->DrawSubset(0);
+			ShadowEnd();
+		}
+
 		//
 		//观察者绘制
 		//
 		device->SetTransform(D3DTS_WORLD, &matWorld);
 		device->SetMaterial(&figuremtrl);
 		figure->DrawSubset(0);
-
-		//
-		//shadow 绘制
-		//
-		if (shadowchanged || moved)
-			matShadowWorld = matTranslation * matShadow;
-		device->SetTransform(D3DTS_WORLD, &matShadowWorld);
-
-		ShadowBegin();
-		figure->DrawSubset(0);
-		ShadowEnd();
-
 
 		if (flashlight)
 		{
@@ -469,7 +725,7 @@ public:
 		}
 		figurelight->DrawSubset(0); 
 		device->SetTransform(D3DTS_WORLD, &matTranslation2);
-		//figurelight->DrawSubset(0);
+		figurelight->DrawSubset(0);
 		device->SetRenderState(D3DRS_SLOPESCALEDEPTHBIAS, 0);
 		device->SetRenderState(D3DRS_DEPTHBIAS, 0);
 		device->SetTexture(0, 0);
