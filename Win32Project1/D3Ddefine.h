@@ -23,7 +23,7 @@
 //尺度定义
 #define SKYRADIUS				1500.0f				//天空半径
 #define SUNDIST					1000.0f				//
-#define SUNRADIUS				(SUNDIST*1.392/149.59787/2)	//太阳半径
+#define SUNRADIUS				(SUNDIST*12/*1.392*//149.59787/2)	//太阳半径
 #define VIEWRADIUS				10000.0f			//视线最远距离（远裁面），影响雾距离
 #define BLOCKRADIUS				200.0f				//一个区块的半径（正方形半边长）
 #define BLOCKRANGE				50.0f				//区块显示范围，超出范围的物体不绘制
